@@ -1,0 +1,15 @@
+services:
+  anythingllm:
+    image: mintplexlabs/anythingllm:latest
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      STORAGE_DIR: /app/server/storage
+    volumes:
+      - rag-llm_anythingllm_storage:/app/server/storage
+    restart: unless-stopped
+
+volumes:
+  rag-llm_anythingllm_storage:
+    external: true
