@@ -5,5 +5,6 @@ anythingllm_storage/
 *.sqlite
 *.sqlite3
 *.log
+secrets.txt
 node_modules/
 dist/

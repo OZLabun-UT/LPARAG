@@ -6,8 +6,6 @@ Instructions:
 sudo bash run_space.sh
 docker compose up -d
 
-#
-
 sudo docker start anythingllm
 sudo docker logs -n 200 anythingllm
 
@@ -18,3 +16,9 @@ Check:
 sudo docker compose ps
 Expose:
 ngrok http 3001
+
+# AWS Deploy
+
+cd aws-interface
+uvicorn main:app --reload --port 8000
+
