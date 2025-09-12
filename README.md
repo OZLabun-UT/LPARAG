@@ -19,6 +19,14 @@ ngrok http 3001
 
 # AWS Deploy
 
+source .venv/bin/activate
 cd aws-interface
 uvicorn main:app --reload --port 8000
+
+
+# Use PDF Chunker
+
+python chunker.py ./pdfs
+
+"What is The radiation energy as a function of distance z through the undulator for different values of energy spread?"
 
