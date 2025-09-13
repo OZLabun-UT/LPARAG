@@ -1,72 +1,65 @@
+import fitz  # PyMuPDF
 import os
-import json
-import pdfplumber
-import camelot
-from pdf2image import convert_from_path
-from pathlib import Path
+import sys
 
-def extract_pdf(pdf_path, out_dir):
-    pdf_name = Path(pdf_path).stem
-    pdf_out = Path(out_dir) / pdf_name
-    pdf_out.mkdir(parents=True, exist_ok=True)
+def extract_from_pdf(pdf_path, output_folder="output"):
+    # Open PDF
+    doc = fitz.open(pdf_path)
 
-    # ---- Extract text ----
-    text_content = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text()
-            if text:
-                text_content.append({"page": i, "text": text})
+    # Create folders
+    pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    base_output = os.path.join(output_folder, pdf_name)
+    text_folder = os.path.join(base_output, "text")
+    image_folder = os.path.join(base_output, "images")
 
-    with open(pdf_out / "text.json", "w", encoding="utf-8") as f:
-        json.dump(text_content, f, indent=2, ensure_ascii=False)
+    os.makedirs(text_folder, exist_ok=True)
+    os.makedirs(image_folder, exist_ok=True)
 
-    # ---- Extract tables ----
-    try:
-        tables = camelot.read_pdf(pdf_path, pages="all")
-        table_content = []
-        for t in tables:
-            table_content.append({"page": t.page, "table": t.df.to_dict()})
+    # Loop through pages
+    for page_index in range(len(doc)):
+        page = doc.load_page(page_index)
 
-        with open(pdf_out / "tables.json", "w", encoding="utf-8") as f:
-            json.dump(table_content, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"[WARN] Table extraction failed for {pdf_name}: {e}")
+        # ---- Extract text ----
+        text = page.get_text("text")
+        text_file = os.path.join(text_folder, f"page_{page_index+1}.txt")
+        with open(text_file, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"[+] Saved text: {text_file}")
 
-    # ---- Extract images ----
-    img_dir = pdf_out / "images"
-    img_dir.mkdir(exist_ok=True)
+        # ---- Extract images ----
+        image_list = page.get_images(full=True)
+        if image_list:
+            print(f"[+] Found {len(image_list)} images on page {page_index+1}")
+        else:
+            print(f"[!] No images found on page {page_index+1}")
 
-    try:
-        images = convert_from_path(pdf_path)
-        for i, img in enumerate(images, start=1):
-            img_path = img_dir / f"page_{i}.png"
-            img.save(img_path, "PNG")
-    except Exception as e:
-        print(f"[WARN] Image extraction failed for {pdf_name}: {e}")
+        for image_index, img in enumerate(image_list, start=1):
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            image_ext = base_image["ext"]
 
-    print(f"[INFO] Finished extracting {pdf_name} → {pdf_out}")
+            image_name = f"page{page_index+1}_img{image_index}.{image_ext}"
+            image_path = os.path.join(image_folder, image_name)
 
+            with open(image_path, "wb") as img_file:
+                img_file.write(image_bytes)
+            print(f"    Saved image: {image_path}")
 
-def process_pdfs(input_dir, output_dir="pdf_output"):
-    input_dir = Path(input_dir)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True)
-
-    pdfs = list(input_dir.glob("*.pdf"))
-    if not pdfs:
-        print(f"[ERROR] No PDFs found in {input_dir}")
-        return
-
-    for pdf in pdfs:
-        extract_pdf(pdf, output_dir)
+    print(f"\n[✓] Finished extracting {pdf_path}")
+    print(f"    Output in: {base_output}")
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Extract text, tables, and images from PDFs.")
-    parser.add_argument("input_dir", help="Folder containing PDFs")
-    parser.add_argument("--output_dir", default="pdf_output", help="Folder to save extracted content")
-    args = parser.parse_args()
+    # Default input dir = ./pdfs
+    input_dir = sys.argv[1] if len(sys.argv) > 1 else "pdfs"
+    output_dir = sys.argv[2] if len(sys.argv) > 2 else "output"
 
-    process_pdfs(args.input_dir, args.output_dir)
+    if not os.path.exists(input_dir):
+        print(f"[!] Input directory '{input_dir}' does not exist.")
+        sys.exit(1)
+
+    for filename in os.listdir(input_dir):
+        if filename.lower().endswith(".pdf"):
+            pdf_path = os.path.join(input_dir, filename)
+            extract_from_pdf(pdf_path, output_dir)

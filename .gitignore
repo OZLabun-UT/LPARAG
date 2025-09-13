@@ -8,3 +8,8 @@ anythingllm_storage/
 secrets.txt
 node_modules/
 dist/
+.venv
+.venv/
+venv/
+pdf-chunker/output/
+pdf-chunker/pdfs/

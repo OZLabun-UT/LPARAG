@@ -28,5 +28,7 @@ uvicorn main:app --reload --port 8000
 
 python chunker.py ./pdfs
 
+python s3_push.py
+
 "What is The radiation energy as a function of distance z through the undulator for different values of energy spread?"
 
