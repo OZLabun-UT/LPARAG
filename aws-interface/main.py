@@ -125,6 +125,8 @@ def make_presigned_doc(s3_uri: str):
 
 
 import re
+import os
+import mimetypes
 
 @app.post("/query")
 async def query_kb(query: dict):
@@ -161,13 +163,11 @@ async def query_kb(query: dict):
                         "mime_type": mimetypes.guess_type(key)[0] or "application/octet-stream"
                     })
 
-                # If this is a text page, find the sibling image
+                # If it's a text page, attach all images from same page
                 if "/text/page" in key:
                     base_prefix, page_file = key.split("/text/")
                     page_id = os.path.splitext(os.path.basename(page_file))[0]  # e.g. "page_7"
-
-                    # normalize: page_7 → page7
-                    page_id_norm = re.sub(r"_(\d+)", r"\1", page_id)
+                    page_id_norm = re.sub(r"_(\d+)", r"\1", page_id)  # → "page7"
 
                     img_prefix = f"{base_prefix}/images/{page_id_norm}_img"
                     resp = s3.list_objects_v2(Bucket=bucket, Prefix=img_prefix)
@@ -185,10 +185,8 @@ async def query_kb(query: dict):
                                     "url": presigned_url,
                                     "mime_type": "image/jpeg"
                                 })
-                                break  # only attach the first image match
 
         return {"answer": answer, "documents": links}
 
     except Exception as e:
         return {"error": str(e)}
-
