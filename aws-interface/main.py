@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 import os
 import boto3
 import re
 import mimetypes
+from pathlib import Path
+import shutil
+import uvicorn
 
 # Load secrets from .env
 load_dotenv(override=True)
@@ -19,7 +22,6 @@ s3 = boto3.client("s3", region_name=REGION)
 
 app = FastAPI()
 
-
 # -----------------------
 # Utility
 # -----------------------
@@ -31,12 +33,8 @@ def parse_s3_uri(uri: str):
     return match.group(1), match.group(2)
 
 
-def make_presigned_doc(s3_uri: str):
+def make_presigned(bucket: str, key: str):
     """Generate presigned URL + MIME type for an S3 object."""
-    bucket, key = parse_s3_uri(s3_uri)
-    if not bucket or not key:
-        return None
-
     presigned_url = s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": key},
@@ -45,8 +43,11 @@ def make_presigned_doc(s3_uri: str):
     mime_type, _ = mimetypes.guess_type(key)
     if not mime_type:
         mime_type = "application/octet-stream"
-
-    return {"source": s3_uri, "url": presigned_url, "mime_type": mime_type}
+    return {
+        "source": f"s3://{bucket}/{key}",
+        "url": presigned_url,
+        "mime_type": mime_type,
+    }
 
 
 # -----------------------
@@ -62,7 +63,7 @@ def serve_ui():
       <style>
         body { font-family: Arial, sans-serif; margin: 2rem; }
         #answer { margin-top: 1rem; padding: 1rem; border: 1px solid #ccc; }
-        img { margin: 5px; border: 1px solid #ccc; max-width: 400px; }
+        img, svg { margin: 5px; border: 1px solid #ccc; max-width: 400px; }
       </style>
     </head>
     <body>
@@ -70,6 +71,13 @@ def serve_ui():
       <input type="text" id="question" placeholder="Type your question..." size="50"/>
       <button onclick="ask()">Ask</button>
       <div id="answer"></div>
+
+      <h2>Upload a PDF</h2>
+      <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="fileInput" accept="application/pdf"/>
+        <button type="submit">Upload</button>
+      </form>
+      <div id="uploadResult"></div>
 
       <script>
         async function ask() {
@@ -91,6 +99,8 @@ def serve_ui():
             for (const doc of data.documents) {
               if (doc.mime_type && doc.mime_type.startsWith("image/")) {
                 html += `<li><img src="${doc.url}" alt="Figure"></li>`;
+              } else if (doc.mime_type === "image/svg+xml") {
+                html += `<li><object type="image/svg+xml" data="${doc.url}" width="400"></object></li>`;
               } else if (doc.mime_type === "application/pdf") {
                 html += `<li><a href="${doc.url}" target="_blank">📄 PDF: ${doc.source}</a></li>`;
               } else {
@@ -105,29 +115,32 @@ def serve_ui():
 
           document.getElementById("answer").innerHTML = html;
         }
+
+        document.getElementById("uploadForm").onsubmit = async (e) => {
+          e.preventDefault();
+          const file = document.getElementById("fileInput").files[0];
+          const formData = new FormData();
+          formData.append("file", file);
+
+          const res = await fetch("/upload", {
+            method: "POST",
+            body: formData
+          });
+          const data = await res.json();
+          document.getElementById("uploadResult").innerText =
+            data.status === "ok"
+              ? "✅ Uploaded to " + data.path
+              : "❌ Error: " + (data.error || "unknown");
+        };
       </script>
     </body>
     </html>
     """
 
 
-def make_presigned_doc(s3_uri: str):
-    bucket, key = parse_s3_uri(s3_uri)
-    if not bucket or not key:
-        return None
-    presigned_url = s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=3600,
-    )
-    mime_type, _ = mimetypes.guess_type(key)
-    return {"source": s3_uri, "url": presigned_url, "mime_type": mime_type or "application/octet-stream"}
-
-
-import re
-import os
-import mimetypes
-
+# -----------------------
+# Query KB
+# -----------------------
 @app.post("/query")
 async def query_kb(query: dict):
     try:
@@ -150,43 +163,55 @@ async def query_kb(query: dict):
             for ref in citation.get("retrievedReferences", []):
                 s3_uri = ref["location"]["s3Location"]["uri"]
                 bucket, key = parse_s3_uri(s3_uri)
+                if not (bucket and key):
+                    continue
 
-                if bucket and key:
-                    presigned_url = s3.generate_presigned_url(
-                        "get_object",
-                        Params={"Bucket": bucket, "Key": key},
-                        ExpiresIn=3600,
-                    )
-                    links.append({
-                        "source": s3_uri,
-                        "url": presigned_url,
-                        "mime_type": mimetypes.guess_type(key)[0] or "application/octet-stream"
-                    })
+                # Always add the original reference
+                links.append(make_presigned(bucket, key))
 
-                # If it's a text page, attach all images from same page
-                if "/text/page" in key:
+                # If it's a text page, try to collect images/vectors/figures
+                if "/text/" in key:
                     base_prefix, page_file = key.split("/text/")
-                    page_id = os.path.splitext(os.path.basename(page_file))[0]  # e.g. "page_7"
-                    page_id_norm = re.sub(r"_(\d+)", r"\1", page_id)  # → "page7"
+                    page_id = os.path.splitext(os.path.basename(page_file))[0]  # e.g. "page_3"
 
-                    img_prefix = f"{base_prefix}/images/{page_id_norm}_img"
-                    resp = s3.list_objects_v2(Bucket=bucket, Prefix=img_prefix)
+                    for folder in ["images", "vectors", "figures"]:
+                        prefix = f"{base_prefix}/{folder}/{page_id}"
+                        resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
 
-                    if "Contents" in resp:
+                        if "Contents" not in resp:
+                            continue  # no such folder or no files
+
+                        count = 0
                         for obj in resp["Contents"]:
-                            if obj["Key"].lower().endswith((".png", ".jpg", ".jpeg")):
-                                presigned_url = s3.generate_presigned_url(
-                                    "get_object",
-                                    Params={"Bucket": bucket, "Key": obj["Key"]},
-                                    ExpiresIn=3600,
-                                )
-                                links.append({
-                                    "source": f"s3://{bucket}/{obj['Key']}",
-                                    "url": presigned_url,
-                                    "mime_type": "image/jpeg"
-                                })
+                            if count >= 3:
+                                break
+                            links.append(make_presigned(bucket, obj["Key"]))
+                            count += 1
 
         return {"answer": answer, "documents": links}
 
     except Exception as e:
         return {"error": str(e)}
+
+
+# -----------------------
+# Upload PDFs locally
+# -----------------------
+BASE_DIR = Path(__file__).resolve().parent.parent  # goes up from aws-interface
+UPLOAD_DIR = BASE_DIR / "pdf-chunker" / "pdfs"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    try:
+        file_path = UPLOAD_DIR / file.filename
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        return {"status": "ok", "path": str(file_path)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

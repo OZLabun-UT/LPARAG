@@ -2,3 +2,8 @@ fastapi
 uvicorn 
 boto3
 dotenv
+python-multipart
+opencv-python
+unstructured[all-docs]
+tqdm
+poppler
