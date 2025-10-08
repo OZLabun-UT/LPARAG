@@ -20,8 +20,8 @@ ngrok http 3001
 # AWS Deploy
 
 source .venv/bin/activate
-cd aws-interface
-uvicorn main:app --reload --port 8000
+
+python -m aws_interface.main
 
 # Forward
 
@@ -43,15 +43,11 @@ plasma-based acceleration scheme"
 
     Pressing: Get EC2 permissions
     Add captions to images and some intro context
-    Add loading thinking bar
-        Like gpt does it with "querying x... thinking about y'
 
     Benchmark w confusing context
     Benchmark long term memory
 
     Figure out how to make it so ppl can make accounts and stuff
-    User facing chat history stuff
-    Make website to host arxiv scraper and also pdf uploads from tau ppl
     Can we figure out how to see relevant appendices when there's not much nat lang there?
     AWS enabled interfact
 

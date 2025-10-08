@@ -11,5 +11,5 @@ dist/
 .venv
 .venv/
 venv/
-pdf-chunker/output/
-pdf-chunker/pdfs/
+pdf_chunker/output/
+pdf_chunker/pdfs/

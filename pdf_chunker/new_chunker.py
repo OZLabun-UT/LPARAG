@@ -62,6 +62,20 @@ def extract_with_docling(pdf_path: Path, output_root: Path = Path("output")):
         (chunks_dir / f"chunk_{i:03d}.txt").write_text(enriched, encoding="utf-8")
 
     print(f"[✓] {name}: JSON->{json_path}  images->{images_dir}  chunks->{chunks_dir}")
+def extract_text_for_session(pdf_path: Path) -> str:
+    """
+    Runs Docling extraction and returns a combined text string of all chunked content.
+    Does NOT write anything to S3 or DB—just returns text for in-session use.
+    """
+    from io import StringIO
+    output_dir = Path("/tmp/docling_tmp_output")
+    extract_with_docling(pdf_path, output_dir)
+    chunks_dir = output_dir / pdf_path.stem / "chunks" / "text"
+    buffer = StringIO()
+    if chunks_dir.exists():
+        for chunk_file in sorted(chunks_dir.glob("*.txt")):
+            buffer.write(chunk_file.read_text(encoding="utf-8") + "\n\n")
+    return buffer.getvalue()
 
 
 if __name__ == "__main__":
