@@ -40,24 +40,15 @@ plasma-based acceleration scheme"
 
 # EC2 Deploy
 
->SSH into EC2
-ssh -i "your-key.pem" ec2-user@<your-ec2-public-ip>
+SSH in:
+ssh -i rag-instance.pem ubuntu@18.217.232.70
 
->Install core dependencies
-sudo yum update -y
-sudo yum install git python3 python3-pip nginx -y
+Setup:
+sudo apt update && sudo apt upgrade -y
 
->Clone your project
-git clone https://github.com/<you>/RAG-LLM.git
-cd RAG-LLM
+Upload everything:
+scp -i rag-instance.pem -r ~/phys/rag-llm ubuntu@18.217.232.70:/home/ubuntu/
 
->Set up virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
->Install dependencies
-pip install --upgrade pip
-pip install fastapi uvicorn boto3 python-dotenv transformers tqdm docling docling-core
 
 
 
