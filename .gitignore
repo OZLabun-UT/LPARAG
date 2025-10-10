@@ -13,3 +13,4 @@ dist/
 venv/
 pdf_chunker/output/
 pdf_chunker/pdfs/
+*.pem

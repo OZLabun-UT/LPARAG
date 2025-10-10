@@ -38,6 +38,28 @@ python s3_push.py
 "What is One of the major goals of the ultrahigh-gradient,
 plasma-based acceleration scheme"
 
+# EC2 Deploy
+
+>SSH into EC2
+ssh -i "your-key.pem" ec2-user@<your-ec2-public-ip>
+
+>Install core dependencies
+sudo yum update -y
+sudo yum install git python3 python3-pip nginx -y
+
+>Clone your project
+git clone https://github.com/<you>/RAG-LLM.git
+cd RAG-LLM
+
+>Set up virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+>Install dependencies
+pip install --upgrade pip
+pip install fastapi uvicorn boto3 python-dotenv transformers tqdm docling docling-core
+
+
 
 # To-dos
 

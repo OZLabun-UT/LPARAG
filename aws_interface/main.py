@@ -58,7 +58,7 @@ def serve_ui():
     <html lang="en">
     <head>
       <meta charset="UTF-8" />
-      <title>Knowledge Base Chat</title>
+      <title>LWFA Chat</title>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
       <style>
         :root {
