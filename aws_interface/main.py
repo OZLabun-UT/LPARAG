@@ -11,21 +11,33 @@ import uvicorn
 from uuid import uuid4
 import tempfile
 import json
-
+import subprocess
 from pdf_chunker.new_chunker import extract_text_for_session
 
-
+# -----------------------
+# Environment & paths
+# -----------------------
 load_dotenv(override=True)
+
+BASE_DIR = Path(__file__).resolve().parent.parent  # /rag-llm
+PDF_CHUNKER_DIR = BASE_DIR / "pdf_chunker"
+UPLOAD_DIR = PDF_CHUNKER_DIR / "pdfs"
+OUTPUT_DIR = PDF_CHUNKER_DIR / "output"
+
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+CHAT_PASSWORD = os.getenv("CHAT_PASSWORD")
 KB_ID = os.getenv("KB_ID")
-REGION = "us-east-2"
+REGION = os.getenv("AWS_REGION", "us-east-2")
 MODEL_ARN = os.getenv("MODEL_ARN")
 
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 app = FastAPI()
 
-# In-memory conversation + temporary data
-session_state = {}  # { session_id: { "history": [], "citations": [], "temp_pdfs": [ {"filename": str, "text": str} ] } }
+# In-memory state
+session_state = {}
 
 # -----------------------
 # Utility Functions
@@ -35,6 +47,7 @@ def parse_s3_uri(uri: str):
     if not match:
         return None, None
     return match.group(1), match.group(2)
+
 
 def make_presigned(bucket: str, key: str):
     presigned_url = s3.generate_presigned_url(
@@ -51,242 +64,142 @@ def make_presigned(bucket: str, key: str):
         "mime_type": mime_type,
         "display_name": display_name,
     }
+
+# -----------------------
+# Auth Routes
+# -----------------------
 @app.get("/", response_class=HTMLResponse)
-def serve_ui():
+def serve_login_page():
     return r"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html>
     <head>
-      <meta charset="UTF-8" />
-      <title>LWFA Chat</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+      <meta charset="UTF-8">
+      <title>Chatbot Login</title>
       <style>
-        :root {
-          --bg:#f5f7fa; --card-bg:#ffffffcc; --accent-bg:#eef2ff;
-          --primary:#2563eb; --accent:#7c3aed;
-          --text:#111827; --subtext:#4b5563;
-          --border:#e5e7eb; --radius:12px; --shadow:0 2px 8px rgba(0,0,0,0.08);
-        }
-        [data-theme="dark"] {
-          --bg:#0d1117; --card-bg:#1e2531cc; --accent-bg:#222a35;
-          --primary:#60a5fa; --accent:#a78bfa;
-          --text:#f3f4f6; --subtext:#9ca3af;
-          --border:#374151; --shadow:0 4px 16px rgba(0,0,0,0.5);
-        }
         body {
-          font-family:'Inter',sans-serif;
-          background:var(--bg); color:var(--text);
-          margin:0; min-height:100vh;
-          display:flex; flex-direction:column; align-items:center; justify-content:center;
-          padding:1.5rem; transition:background .3s,color .3s;
+          background: #0d1117;
+          color: #f3f4f6;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          font-family: Inter, sans-serif;
         }
-        header{display:flex;justify-content:center;align-items:center;width:100%;margin-bottom:1rem;}
-        h1{
-          font-family:'Orbitron',sans-serif;font-weight:800;font-size:2.3rem;
-          background:linear-gradient(90deg,var(--primary),var(--accent));
-          -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-          letter-spacing:.05em;margin:0;text-align:center;
+        .login-box {
+          background: #1e2531;
+          padding: 2rem 3rem;
+          border-radius: 12px;
+          box-shadow: 0 0 25px rgba(0,0,0,0.4);
+          text-align: center;
         }
-        .toggle{position:absolute;top:1rem;right:1.5rem;background:none;border:none;
-                font-size:1.3rem;color:var(--accent);cursor:pointer;transition:transform .2s;}
-        .toggle:hover{transform:rotate(15deg);}
-        main{width:100%;max-width:1200px;display:flex;flex-direction:column;align-items:center;gap:1rem;}
-        #chat{
-          background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);
-          box-shadow:var(--shadow);width:100%;height:75vh;overflow-y:auto;
-          padding:1.2rem 1.5rem;backdrop-filter:blur(10px);
+        input {
+          margin-top: 1rem;
+          width: 100%;
+          padding: .7rem;
+          border-radius: 8px;
+          border: none;
+          font-size: 1rem;
         }
-        .user-msg,.assistant-msg{margin:.6rem 0;padding:.8rem 1rem;border-radius:10px;max-width:85%;}
-        .user-msg{background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;margin-left:auto;text-align:right;}
-        .assistant-msg{background:var(--accent-bg);color:var(--text);margin-right:auto;}
-        .input-row{
-          display:flex;align-items:center;justify-content:center;
-          background:var(--card-bg);border:1px solid var(--border);
-          border-radius:var(--radius);box-shadow:var(--shadow);
-          width:100%;padding:.8rem 1rem;gap:.6rem;backdrop-filter:blur(10px);
+        button {
+          margin-top: 1.2rem;
+          padding: .7rem;
+          width: 100%;
+          border: none;
+          border-radius: 8px;
+          background: linear-gradient(135deg, #7c3aed, #2563eb);
+          color: white;
+          font-weight: bold;
+          cursor: pointer;
         }
-        input[type=text],input[type=number]{
-          background:var(--accent-bg);color:var(--text);border:1px solid var(--border);
-          border-radius:8px;padding:.6rem 1rem;font-size:1rem;transition:border .2s;
-        }
-        input[type=text]{flex:1;} input[type=number]{width:60px;text-align:center;}
-        input:focus{border-color:var(--accent);outline:none;}
-        button{
-          padding:.6rem 1rem;background:linear-gradient(135deg,var(--accent),var(--primary));
-          border:none;border-radius:8px;color:white;font-weight:600;cursor:pointer;
-          transition:transform .2s,box-shadow .2s;
-        }
-        button:hover{transform:translateY(-1px);box-shadow:0 0 8px var(--accent);}
-        .upload-toolbar{display:flex;justify-content:center;align-items:center;gap:1rem;margin-top:.3rem;}
-        .upload-btn{
-          background:var(--accent-bg);color:var(--text);border:1px solid var(--border);
-          border-radius:8px;padding:.45rem .9rem;font-size:.9rem;cursor:pointer;
-          transition:all .2s;display:flex;align-items:center;gap:.4rem;
-        }
-        .upload-btn:hover{background:var(--accent);color:white;transform:translateY(-1px);}
-        .hidden-input{display:none;}
-        .figure-grid{
-          display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-          gap:1rem;margin-top:1rem;
-        }
-        .figure-card{
-          position:relative;background:var(--accent-bg);border:1px solid var(--border);
-          border-radius:10px;overflow:hidden;cursor:pointer;
-          transition:transform .2s,box-shadow .2s;height:230px;display:flex;flex-direction:column;
-        }
-        .figure-card:hover{transform:scale(1.03);box-shadow:0 0 12px var(--accent);}
-        .figure-card img{width:100%;height:100%;object-fit:cover;flex-grow:1;}
-        .figure-overlay{
-          position:absolute;bottom:0;left:0;right:0;
-          background:rgba(0,0,0,0.55);color:#fff;font-size:.85rem;
-          text-align:center;padding:.3rem;opacity:0;transition:opacity .2s;
-        }
-        .figure-card:hover .figure-overlay{opacity:1;}
-        #loading,#uploading{display:none;align-items:center;justify-content:center;gap:10px;color:var(--accent);font-weight:500;}
-        .loader{width:18px;height:18px;border:3px solid var(--border);border-top:3px solid var(--accent);
-                border-radius:50%;animation:spin .8s linear infinite;}
-        @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
-        .modal{
-          display:none;position:fixed;z-index:1000;left:0;top:0;width:100%;height:100%;
-          background:rgba(0,0,0,0.7);justify-content:center;align-items:center;
-        }
-        .modal-content{
-          background:var(--card-bg);border-radius:var(--radius);
-          width:80%;max-width:950px;max-height:85vh;box-shadow:var(--shadow);
-          display:flex;flex-direction:column;overflow:hidden;animation:popin .25s ease;
-        }
-        @keyframes popin{from{opacity:0;transform:scale(.95);}to{opacity:1;transform:scale(1);}}
-        .modal img{width:100%;max-height:45vh;object-fit:contain;border-bottom:1px solid var(--border);}
-        .modal-body{flex:1;overflow-y:auto;padding:1rem;}
-        .modal h3{color:var(--accent);font-family:'Inter',sans-serif;margin-bottom:.4rem;}
-        .modal p{color:var(--subtext);font-size:.95rem;line-height:1.5;}
-        .close-btn{align-self:flex-end;margin:.8rem 1rem 0 0;background:var(--accent);
-                   color:white;border:none;border-radius:6px;padding:.4rem .8rem;cursor:pointer;}
-        .close-btn:hover{background:var(--primary);}
+        button:hover { opacity: .9; }
+        p { color: #f87171; }
       </style>
     </head>
     <body>
-      <button id="themeToggle" class="toggle" title="Toggle theme">🌙</button>
-      <header><h1>Knowledge Base Chat</h1></header>
-      <main>
-        <div id="loading"><div class="loader"></div><span>Thinking...</span></div>
-        <div id="uploading"><div class="loader"></div><span>Uploading...</span></div>
-        <div id="chat"></div>
-        <div class="input-row">
-          <input type="text" id="question" placeholder="Ask your question..." />
-          <input type="number" id="imgLimit" min="1" max="20" value="8" />
-          <button onclick="sendMessage()">Send</button>
-        </div>
-        <div class="upload-toolbar">
-          <label class="upload-btn" for="permFileInput">📁 Permanent Upload</label>
-          <input id="permFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('perm')" />
-          <label class="upload-btn" for="tempFileInput">📄 Temporary Upload</label>
-          <input id="tempFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('temp')" />
-        </div>
-      </main>
-      <div id="figureModal" class="modal">
-        <div class="modal-content">
-          <button class="close-btn" onclick="closeModal()">Close ✕</button>
-          <img id="modalImage" src="" alt="Figure">
-          <div class="modal-body">
-            <h3 id="modalCaption"></h3>
-            <p id="modalContext"></p>
-          </div>
-        </div>
+      <div class="login-box">
+        <h2>🔐 Enter Password</h2>
+        <input type="password" id="pw" placeholder="Password"/>
+        <button onclick="login()">Login</button>
+        <p id="msg"></p>
       </div>
       <script>
-        // Theme toggle
-        const html=document.documentElement;
-        const toggleBtn=document.getElementById('themeToggle');
-        const saved=localStorage.getItem('theme');
-        if(saved==='dark'){html.setAttribute('data-theme','dark');toggleBtn.textContent='☀';}
-        toggleBtn.onclick=()=>{
-          if(html.getAttribute('data-theme')==='dark'){
-            html.removeAttribute('data-theme');toggleBtn.textContent='🌙';localStorage.setItem('theme','light');
+        async function login() {
+          const pw = document.getElementById("pw").value.trim();
+          const res = await fetch("/login", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({password: pw})
+          });
+          const data = await res.json();
+          if (data.status === "ok") {
+            sessionStorage.setItem("auth", "true");
+            window.location.href = "/chat";
           } else {
-            html.setAttribute('data-theme','dark');toggleBtn.textContent='☀';localStorage.setItem('theme','dark');
+            document.getElementById("msg").textContent = "Incorrect password.";
           }
-        };
-        let sessionId=null;
-        async function sendMessage(){
-          const q=document.getElementById("question").value.trim();
-          const imgLimit=parseInt(document.getElementById("imgLimit").value)||8;
-          if(!q)return;
-          const chatBox=document.getElementById("chat");
-          const loading=document.getElementById("loading");
-          chatBox.innerHTML+=`<div class='user-msg'><strong>You:</strong> ${q}</div>`;
-          document.getElementById("question").value="";
-          chatBox.scrollTop=chatBox.scrollHeight;
-          loading.style.display="flex";
-          try{
-            const res=await fetch("/query",{method:"POST",headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({question:q,image_limit:imgLimit,session_id:sessionId})});
-            const data=await res.json();
-            if(!sessionId&&data.session_id)sessionId=data.session_id;
-            let msgHtml="";
-            if(data.error){
-              msgHtml=`<div class='assistant-msg' style='color:#f87171;'>Error: ${data.error}</div>`;
-            } else {
-              msgHtml=`<div class='assistant-msg'><strong>Assistant:</strong> ${data.answer||"(no response)"}`;
-              if(data.pdfs&&data.pdfs.length>0){
-                msgHtml+="<div style='margin-top:0.6rem;'><h4>PDFs:</h4>";
-                for(const pdf of data.pdfs){
-                  const name=pdf.display_name||"View PDF";
-                  msgHtml+=`<a href='${pdf.url}' target='_blank'
-                    style='display:inline-block;margin:0.3rem;padding:0.4rem 0.7rem;
-                    background:var(--accent);color:white;border-radius:6px;
-                    font-size:0.9rem;text-decoration:none;'>📄 ${name}</a>`;
-                }
-                msgHtml+="</div>";
-              }
-              const imgs=(data.documents||[]).filter(d=>d.mime_type&&d.mime_type.startsWith("image/"));
-              if(imgs.length>0){
-                msgHtml+="<div><h4 style='margin-top:0.8rem;'>Figures:</h4><div class='figure-grid'>";
-                for(const img of imgs){
-                  const caption=(img.caption||"No caption").replace(/[`]/g,"'");
-                  const context=(img.context||"No context available").replace(/[`]/g,"'").replace(/\n+/g," ");
-                  msgHtml+=`
-                    <div class='figure-card' onclick='openModal("${img.url}", \`${caption}\`, \`${context}\`)'>
-                      <img src='${img.url}' alt='Figure'>
-                      <div class='figure-overlay'>Click to view details</div>
-                    </div>`;
-                }
-                msgHtml+="</div></div>";
-              }
-              msgHtml+="</div>";
-            }
-            chatBox.innerHTML+=msgHtml;
-            chatBox.scrollTop=chatBox.scrollHeight;
-          } catch(err){
-            chatBox.innerHTML+=`<div class='assistant-msg' style='color:#f87171;'>Network error: ${err}</div>`;
-          } finally{loading.style.display="none";}
         }
-        async function uploadFile(type){
-          const fileInput=document.getElementById(type==='perm'?'permFileInput':'tempFileInput');
-          const file=fileInput.files[0]; if(!file)return;
-          const uploading=document.getElementById("uploading"); uploading.style.display="flex";
-          const form=new FormData(); form.append("file",file);
-          if(type==="temp")form.append("session_id",sessionId||"");
-          const endpoint=type==="perm"?"/upload_permanent":"/upload_temporary";
-          try{await fetch(endpoint,{method:"POST",body:form});
-            alert(`${type==='perm'?'Permanent':'Temporary'} upload successful`);
-          }catch(err){alert("Upload failed: "+err);}finally{uploading.style.display="none";}
-        }
-        function openModal(url,cap,ctx){
-          document.getElementById("modalImage").src=url;
-          document.getElementById("modalCaption").innerText=cap;
-          document.getElementById("modalContext").innerText=ctx;
-          document.getElementById("figureModal").style.display="flex";
-        }
-        function closeModal(){document.getElementById("figureModal").style.display="none";}
-        window.onclick=e=>{if(e.target===document.getElementById("figureModal"))closeModal();}
       </script>
     </body>
     </html>
     """
 
+
+@app.post("/login")
+async def login(request: Request):
+    body = await request.json()
+    password = body.get("password", "")
+    if password == CHAT_PASSWORD:
+        return {"status": "ok"}
+    return {"status": "error"}
+
+
+@app.get("/chat", response_class=HTMLResponse)
+def serve_chat_ui():
+    """Serve the main chatbot UI (protected by login)."""
+    return r"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <script>
+        if(!sessionStorage.getItem("auth")) {
+          window.location.href = "/";
+        }
+      </script>
+    </head>
+    <body>
+    """ + open(Path(__file__).resolve().parent / "chat.html").read() + """
+    </body>
+    </html>
+    """
+
 # -----------------------
-# Query Endpoint (unchanged)
+# S3 + Resync
+# -----------------------
+@app.post("/s3_push")
+async def s3_push():
+    try:
+        s3_script = PDF_CHUNKER_DIR / "s3_push.py"
+        subprocess.run(["python", str(s3_script), str(OUTPUT_DIR)], check=True)
+        return {"status": "ok", "message": "S3 sync completed and local cleanup done."}
+    except subprocess.CalledProcessError as e:
+        return {"status": "error", "message": f"S3 push failed: {e}"}
+
+
+@app.post("/resync_kb")
+async def resync_kb():
+    try:
+        s3_script = PDF_CHUNKER_DIR / "s3_push.py"
+        subprocess.run(["python", str(s3_script), "--resync-only"], check=True)
+        return {"status": "ok", "message": "Knowledge base resync started."}
+    except subprocess.CalledProcessError as e:
+        return {"status": "error", "message": f"Resync failed: {e}"}
+    except Exception as e:
+        return {"status": "error", "message": f"Unexpected error: {e}"}
+
+# -----------------------
+# Query Endpoint
 # -----------------------
 @app.post("/query")
 async def query_kb(query: dict, request: Request):
@@ -296,6 +209,7 @@ async def query_kb(query: dict, request: Request):
         question = query["question"]
         image_limit = int(query.get("image_limit", 8))
 
+        # Build chat + PDF context
         chat_context = "\n".join(
             [f"User: {h['user']}\nAssistant: {h['assistant']}" for h in state["history"][-3:]]
         )
@@ -349,6 +263,7 @@ async def query_kb(query: dict, request: Request):
                 if structured_data and "texts" in structured_data:
                     text_map = {t["self_ref"]: t for t in structured_data["texts"]}
 
+                # -------- collect images --------
                 for folder in ["images/", "output/"]:
                     for k in try_list(f"{base_dir}/{folder}"):
                         if k.lower().endswith((".png", ".jpg", ".jpeg", ".svg")):
@@ -377,10 +292,13 @@ async def query_kb(query: dict, request: Request):
 
                             links.append(img_info)
                             image_count += 1
+
+                # -------- collect PDFs --------
                 for k in try_list(f"{base_dir}/"):
                     if k.lower().endswith(".pdf"):
                         pdf_links.append(make_presigned(bucket, k))
                         break
+
             if image_count >= image_limit:
                 break
 
@@ -392,21 +310,24 @@ async def query_kb(query: dict, request: Request):
         return {"error": str(e)}
 
 # -----------------------
-# Upload Endpoints (unchanged)
+# Upload Endpoints
 # -----------------------
-BASE_DIR = Path(__file__).resolve().parent.parent
-UPLOAD_DIR = BASE_DIR / "pdf_chunker" / "pdfs"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
 @app.post("/upload_permanent")
 async def upload_permanent(file: UploadFile = File(...)):
     try:
         file_path = UPLOAD_DIR / file.filename
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+
+        from pdf_chunker.new_chunker import extract_with_docling
+        print(f"[•] Chunking {file_path} → {OUTPUT_DIR}")
+        extract_with_docling(file_path, OUTPUT_DIR)
+        print(f"[✓] Finished chunking {file.filename}")
+
         return {"status": "ok", "path": str(file_path)}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
 
 @app.post("/upload_temporary")
 async def upload_temporary(request: Request, file: UploadFile = File(...), session_id: str = Form(...)):

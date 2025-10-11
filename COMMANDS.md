@@ -49,6 +49,9 @@ sudo apt update && sudo apt upgrade -y
 Upload everything:
 scp -i rag-instance.pem -r ~/phys/rag-llm ubuntu@18.217.232.70:/home/ubuntu/
 
+DELETE EVERYTHING:
+sudo rm -rf /home/* /var/* /opt/* /tmp/* /srv/* /mnt/* /root/*
+
 
 
 
