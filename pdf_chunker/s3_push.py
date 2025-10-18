@@ -11,24 +11,49 @@ load_dotenv(override=True)
 
 AWS_REGION = "us-east-2"
 
+def folder_exists_in_s3(bucket_name: str, prefix: str) -> bool:
+    """Return True if a folder/prefix already exists in the given S3 bucket."""
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    try:
+        resp = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=1)
+        return "Contents" in resp and len(resp["Contents"]) > 0
+    except Exception as e:
+        print(f"[!] Failed to check S3 for prefix {prefix}: {e}")
+        return False
+
 
 def sync_to_s3(local_folder, bucket_name, prefix="kb-data"):
     """
-    Uploads local_folder to S3, then deletes local files if upload succeeds.
+    Uploads local_folder to S3, but checks if folder already exists.
+    Deletes local files if upload succeeds.
     """
     local_path = Path(local_folder)
     if not local_path.exists():
         print(f"[!] Folder not found: {local_path}")
         sys.exit(2)
 
-    print(f"[•] Uploading {local_folder} → s3://{bucket_name}/{prefix}/ ...")
+    folder_name = local_path.name
+    s3_prefix = f"{prefix}/{folder_name}/"
+
+    # --- Check if folder already exists ---
+    if folder_exists_in_s3(bucket_name, s3_prefix):
+        print(f"[⚠] Folder already exists in S3: s3://{bucket_name}/{s3_prefix}")
+        choice = input("   Overwrite existing folder? [y/N]: ").strip().lower()
+        if choice != "y":
+            print("[⏭] Skipping upload.")
+            return
+
+    print(f"[•] Uploading {local_folder} → s3://{bucket_name}/{s3_prefix} ...")
+
     subprocess.run([
         "aws", "s3", "sync", str(local_folder),
-        f"s3://{bucket_name}/{prefix}/"
+        f"s3://{bucket_name}/{s3_prefix}/",
+        "--delete"
     ], check=True)
-    print(f"[✓] Synced {local_folder} → s3://{bucket_name}/{prefix}/")
 
-    # Cleanup
+    print(f"[✓] Synced {local_folder} → s3://{bucket_name}/{s3_prefix}")
+
+    # --- Cleanup local folder ---
     try:
         for child in local_path.iterdir():
             if child.is_file():
@@ -45,16 +70,13 @@ def resync_knowledge_base(kb_id: str, region: str = AWS_REGION):
     Triggers a Bedrock Knowledge Base ingestion sync using KB_ID and DATA_SOURCE_ID.
     """
     client = boto3.client("bedrock-agent", region_name=region)
-
     data_source_id = os.getenv("DATA_SOURCE_ID")
     if not data_source_id:
         print("[!] Missing DATA_SOURCE_ID in environment (.env)")
         sys.exit(2)
 
     print(f"[•] Starting knowledge base sync for {kb_id} (data source {data_source_id}) ...")
-
     try:
-        # Start the ingestion job
         resp = client.start_ingestion_job(
             knowledgeBaseId=kb_id,
             dataSourceId=data_source_id
@@ -62,7 +84,7 @@ def resync_knowledge_base(kb_id: str, region: str = AWS_REGION):
         job_id = resp["ingestionJob"]["ingestionJobId"]
         print(f"[→] Ingestion job started: {job_id}")
 
-        # Optional: poll for completion
+        # Poll for completion
         while True:
             job = client.get_ingestion_job(
                 knowledgeBaseId=kb_id,
@@ -75,11 +97,9 @@ def resync_knowledge_base(kb_id: str, region: str = AWS_REGION):
                 break
             print(f"   ⏳ In progress... ({status})")
             time.sleep(5)
-
     except Exception as e:
         print(f"[!] Failed to trigger knowledge base sync: {e}")
         sys.exit(2)
-
 
 
 if __name__ == "__main__":
@@ -102,7 +122,6 @@ if __name__ == "__main__":
         sys.exit(0)
 
     local_output = Path(args[0])
-
     if not bucket_name:
         print("[!] Missing PDF_BUCKET in environment")
         sys.exit(2)

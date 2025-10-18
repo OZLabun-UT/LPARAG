@@ -47,9 +47,33 @@ def extract_with_docling(pdf_path: Path, output_root: Path = Path("output")):
     json_path = base / "structured.json"
     dl_doc.save_as_json(
         filename=json_path,
-        artifacts_dir=images_dir,               # ✅ pass Path, not str
+        artifacts_dir=images_dir,               
         image_mode=ImageRefMode.REFERENCED,
     )
+
+        # --- save structured JSON + referenced images ---
+    json_path = base / "structured.json"
+    dl_doc.save_as_json(
+        filename=json_path,
+        artifacts_dir=images_dir,
+        image_mode=ImageRefMode.REFERENCED,
+    )
+
+    # --- filter out small images ---
+    from PIL import Image
+
+    min_width = 90
+    min_height = 90
+
+    for img_path in images_dir.glob("*"):
+        try:
+            with Image.open(img_path) as img:
+                w, h = img.size
+            if w < min_width or h < min_height:
+                img_path.unlink()
+        except Exception as e:
+            print(f"[!] Skipped {img_path}: {e}")
+
 
 
     # --- chunk for RAG ---

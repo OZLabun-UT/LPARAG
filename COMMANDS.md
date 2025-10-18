@@ -22,6 +22,8 @@ ngrok http 3001
 source .venv/bin/activate
 
 python -m aws_interface.main
+python3 -m aws_interface.main
+
 
 # Forward
 
@@ -40,27 +42,41 @@ plasma-based acceleration scheme"
 
 # EC2 Deploy
 
+PERSONAL
+
 SSH in:
 ssh -i rag-instance.pem ubuntu@18.224.212.81
 
 Setup:
 sudo apt update && sudo apt upgrade -y
 
+sudo apt update && sudo apt upgrade -y
+sudo apt install git python3-pip python3-venv nginx -y
+
+
 Run:
  uvicorn app:app --host 0.0.0.0 --port 8000
 
+ACTUAL:
 
-Upload everything:
+chmod 400 rag-instance-actual.pem
 
-DELETE EVERYTHING:
-sudo rm -rf /home/* /var/* /opt/* /tmp/* /srv/* /mnt/* /root/*
+ssh -i rag-instance-actual.pem ubuntu@3.142.186.60
+
+scp -i  rag-instance-actual.pem .env ubuntu@3.142.186.60:/home/ubuntu/tau-topical-expert/.env
+
+
 
 # Github
 
 See origins:
 git remote -v
 
+# Test Questions
 
+"What is the maximum electron energy as a function of laser propagation distance?"
+
+"Explain LWFA to me."
 
 
 # To-dos
@@ -73,7 +89,30 @@ git remote -v
 
     Figure out how to make it so ppl can make accounts and stuff
     Can we figure out how to see relevant appendices when there's not much nat lang there?
-    AWS enabled interfact
+    * Stop multiple of same paper from being in database
+    * Use structured json to find caption
+    * Get name that we want to use as domain name
+    * Kill irrelevant images somehow
+        * Kill all upload from first page?
+        * Kill all smaller than a certain size
+    * Returned images should be indexed and kept in the llm memory (maybe make them selectable)
+    * Save conversations to the side for people to flip back and forth
+    * Keep a version with smaller controlled knowledge base
+    * Make toggle for which AI to use 
+    * Make tabulated data out of images im2graph
 
-    General steps:
 
+    
+[Unit]
+Description=Tau FastAPI Service
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tau-topical-expert
+EnvironmentFile=/home/ubuntu/tau-topical-expert/.env
+ExecStart=/home/ubuntu/tau-topical-expert/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
