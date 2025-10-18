@@ -41,16 +41,24 @@ plasma-based acceleration scheme"
 # EC2 Deploy
 
 SSH in:
-ssh -i rag-instance.pem ubuntu@18.217.232.70
+ssh -i rag-instance.pem ubuntu@18.224.212.81
 
 Setup:
 sudo apt update && sudo apt upgrade -y
 
+Run:
+ uvicorn app:app --host 0.0.0.0 --port 8000
+
+
 Upload everything:
-scp -i rag-instance.pem -r ~/phys/rag-llm ubuntu@18.217.232.70:/home/ubuntu/
 
 DELETE EVERYTHING:
 sudo rm -rf /home/* /var/* /opt/* /tmp/* /srv/* /mnt/* /root/*
+
+# Github
+
+See origins:
+git remote -v
 
 
 
