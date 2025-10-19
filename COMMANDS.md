@@ -33,7 +33,7 @@ ngrok --config /home/murtato/snap/ngrok/315/.config/ngrok/ngrok.yml http 8000
 
 # Use PDF Chunker
 
-python chunker.py ./pdfs
+python new_chunker.py ./pdfs
 
 python s3_push.py
 
@@ -65,7 +65,11 @@ ssh -i rag-instance-actual.pem ubuntu@3.142.186.60
 
 scp -i  rag-instance-actual.pem .env ubuntu@3.142.186.60:/home/ubuntu/tau-topical-expert/.env
 
+# Update EC2
 
+cd ~/tau-topical-expert
+git pull origin main
+sudo systemctl restart tau
 
 # Github
 
