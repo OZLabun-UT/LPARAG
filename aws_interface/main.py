@@ -50,7 +50,6 @@ def parse_s3_uri(uri: str):
         return None, None
     return match.group(1), match.group(2)
 
-
 def make_presigned(bucket: str, key: str):
     presigned_url = s3.generate_presigned_url(
         "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
@@ -146,7 +145,6 @@ def serve_login_page():
     </html>
     """
 
-
 @app.post("/login")
 async def login(request: Request):
     body = await request.json()
@@ -154,7 +152,6 @@ async def login(request: Request):
     if password == CHAT_PASSWORD:
         return {"status": "ok"}
     return {"status": "error"}
-
 
 @app.get("/chat", response_class=HTMLResponse)
 def serve_chat_ui():
@@ -231,7 +228,24 @@ async def query_kb(query: dict, request: Request):
             [f"User: {h['user']}\nAssistant: {h['assistant']}" for h in state["history"][-3:]]
         )
         pdf_text = "\n\n".join([pdf["text"][:5000] for pdf in state["temp_pdfs"]])
-        combined_prompt = f"{chat_context}\n\nRelevant PDF content:\n{pdf_text}\nUser: {question}"
+
+        selected_images = query.get("selected_images", [])
+        image_context = ""
+        if selected_images:
+            for i, img in enumerate(selected_images, 1):
+                image_context += (
+                    f"\n\n[Image {i}]\n"
+                    f"Caption: {img.get('caption')}\n"
+                    f"Context: {img.get('context')}\n"
+                    f"Source: {img.get('source')}\n"
+                    f"NOTE: User has selected this image for reference. "
+                    f"Use the caption and context to answer questions about this figure."
+                )
+
+        combined_prompt = (
+            f"{chat_context}\n\nRelevant PDF content:\n{pdf_text}"
+            f"\n\nSelected Figures for Reference:{image_context}\n\nUser: {question}"
+        )
 
         # ---- Query Bedrock ----
         response = bedrock_agent.retrieve_and_generate(
@@ -244,32 +258,56 @@ async def query_kb(query: dict, request: Request):
 
         answer = response["output"]["text"]
         citations = response.get("citations", [])
-        links, pdf_links, processed_folders, image_count = [], [], {}, 0
+        links, pdf_links, processed_folders = [], [], {}
+        total_images_collected = 0
 
         # ---- Utility helpers ----
         def get_base_dir_from_key(key: str):
+            """
+            Determine the base directory for a given S3 key.
+            Compatible with both old and new folder layouts.
+            """
             parts = key.split("/")
+            # Handle common patterns
             if "chunks" in parts:
                 idx = parts.index("chunks")
                 return "/".join(parts[:idx])
             if "structured.json" in parts:
                 return "/".join(parts[:-1])
-            if "output" in parts and "images" in parts:
+            if "output" in parts:
                 idx = parts.index("output")
+                return "/".join(parts[:idx])
+            if "images" in parts:
+                idx = parts.index("images")
                 return "/".join(parts[:idx])
             return "/".join(parts[:3])
 
+
         def find_all_images(bucket, prefix):
+            """
+            List all image objects (.png, .jpg, .jpeg, .svg) under a given S3 prefix.
+            Includes robust pagination to ensure all images are returned.
+            """
             found = []
+            continuation_token = None
             try:
-                resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-                for obj in resp.get("Contents", []):
-                    key = obj["Key"]
-                    if key.lower().endswith((".png", ".jpg", ".jpeg", ".svg")):
-                        found.append(key)
+                while True:
+                    kwargs = {"Bucket": bucket, "Prefix": prefix}
+                    if continuation_token:
+                        kwargs["ContinuationToken"] = continuation_token
+                    resp = s3.list_objects_v2(**kwargs)
+                    for obj in resp.get("Contents", []):
+                        key = obj["Key"]
+                        if key.lower().endswith((".png", ".jpg", ".jpeg", ".svg")):
+                            found.append(key)
+                    if resp.get("IsTruncated"):
+                        continuation_token = resp.get("NextContinuationToken")
+                    else:
+                        break
             except Exception as e:
                 print(f"[!] Error listing {prefix}: {e}")
             return found
+
 
         def try_list(prefix):
             try:
@@ -277,6 +315,49 @@ async def query_kb(query: dict, request: Request):
                 return [obj["Key"] for obj in resp.get("Contents", [])]
             except Exception:
                 return []
+
+        def extract_surrounding_context(structured_data, page_no, max_chars=800):
+            """Extract richer context from the same page and adjacent pages."""
+            if not structured_data or "texts" not in structured_data:
+                return "No context available"
+            
+            # Collect texts from target page and adjacent pages
+            relevant_texts = []
+            for text_obj in structured_data["texts"]:
+                if not text_obj.get("prov"):
+                    continue
+                text_page = text_obj["prov"][0].get("page_no")
+                # Include same page and ±1 pages
+                if text_page is not None and abs(text_page - page_no) <= 1:
+                    relevant_texts.append({
+                        "page": text_page,
+                        "text": text_obj["text"],
+                        "label": text_obj.get("label", "")
+                    })
+            
+            # Sort by page number
+            relevant_texts.sort(key=lambda x: x["page"])
+            
+            # Build context prioritizing section headers and nearby text
+            context_parts = []
+            total_chars = 0
+            
+            # First pass: add section headers
+            for t in relevant_texts:
+                if t["label"] in ["section_header", "title"] and total_chars < max_chars:
+                    context_parts.append(f"[{t['label'].upper()}] {t['text']}")
+                    total_chars += len(t['text'])
+            
+            # Second pass: add regular text from the same page
+            for t in relevant_texts:
+                if t["page"] == page_no and t["label"] not in ["section_header", "title"] and total_chars < max_chars:
+                    text_snippet = t["text"][:max_chars - total_chars]
+                    context_parts.append(text_snippet)
+                    total_chars += len(text_snippet)
+                    if total_chars >= max_chars:
+                        break
+            
+            return " ".join(context_parts) if context_parts else "No context available"
 
         # -------- MAIN LOOP --------
         for citation in citations:
@@ -309,29 +390,41 @@ async def query_kb(query: dict, request: Request):
                 if structured_data and "texts" in structured_data:
                     text_map = {t["self_ref"]: t for t in structured_data["texts"]}
 
-                # ---- Find images ----
+                # ---- Find ALL images first ----
                 paper_name = Path(base_dir).name
                 possible_prefixes = [
                     f"{base_dir}/output/{paper_name}/images/",
                     f"{base_dir}/output/images/",
+                    f"{base_dir}/{paper_name}/images/",
                     f"{base_dir}/images/",
                 ]
-                found_keys = []
+                all_image_keys = []
                 for prefix in possible_prefixes:
-                    found_keys.extend(find_all_images(bucket, prefix))
-                if found_keys:
-                    print(f"[📂] Found {len(found_keys)} images under {base_dir}")
-                else:
-                    print(f"[!] No images found under {base_dir}")
+                    all_image_keys.extend(find_all_images(bucket, prefix))
 
-                # ---- Build picture map with captions ----
+                # ---- Filter images by size ----
+                valid_images = []
+                for k in sorted(set(all_image_keys)):
+                    if is_large_enough(bucket, k, min_size=90):  # Lower threshold back to 90
+                        valid_images.append(k)
+                    else:
+                        print(f"[⏭] Skipping small image: {k}")
+
+                print(f"[📂] Found {len(valid_images)} valid images under {base_dir}")
+
+                # ---- Build picture map with enhanced captions ----
                 pic_ref_map = {}
                 if structured_data and "pictures" in structured_data:
                     for pic in structured_data["pictures"]:
                         caption = ""
                         page_no = None
+                        figure_number = ""
 
-                        # Look for caption-labeled text in children
+                        # Extract figure number
+                        if pic.get("label"):
+                            figure_number = pic["label"]
+
+                        # Try caption-labeled text
                         if pic.get("children"):
                             for child in pic["children"]:
                                 ref = child.get("$ref")
@@ -341,7 +434,7 @@ async def query_kb(query: dict, request: Request):
                                         caption = child_obj["text"].strip()
                                         break
 
-                        # Fallback: first text child
+                        # Fallback: first child text
                         if not caption and pic.get("children"):
                             for child in pic["children"]:
                                 ref = child.get("$ref")
@@ -352,53 +445,93 @@ async def query_kb(query: dict, request: Request):
                         if pic.get("prov"):
                             page_no = pic["prov"][0].get("page_no", None)
 
-                        pic_ref_map[pic["self_ref"]] = {"caption": caption, "page_no": page_no}
+                        pic_ref_map[pic["self_ref"]] = {
+                            "caption": caption,
+                            "page_no": page_no,
+                            "figure_number": figure_number
+                        }
 
-                # ---- Add image objects ----
-                for k in sorted(set(found_keys)):
-                    if image_count >= image_limit:
-                        break
-                    if not is_large_enough(bucket, k, min_size=130):
-                        print(f"[⏭] Skipping small image: {k}")
-                        continue
+                # ---- Calculate how many images we can add from this paper ----
+                remaining_slots = image_limit - total_images_collected
+                images_to_add = valid_images[:remaining_slots]
 
+                # ---- Add image objects with enhanced metadata ----
+                for idx, k in enumerate(images_to_add):
                     img_info = make_presigned(bucket, k)
                     img_info["caption"] = "No caption found"
                     img_info["context"] = "No context available"
 
-                    # Try to attach caption by picture index
+                    # --- Add relevance if available ---
+                    # If you have a similarity or retrieval score for this image, attach it here.
+                    # Example: match["score"] if you use FAISS, Pinecone, etc.
+                    if "score" in locals():  # or however your retrieval loop provides it
+                        try:
+                            img_info["relevance"] = round(float(score), 3)
+                        except Exception:
+                            img_info["relevance"] = None
+                    else:
+                        img_info["relevance"] = None
+
+                    links.append(img_info)
+
+
+                    # Try to attach caption/context by matching picture ref
                     pic_keys = list(pic_ref_map.keys())
                     matched_ref = None
-                    if image_count < len(pic_keys):
-                        matched_ref = pic_keys[image_count]
+                    if idx < len(pic_keys):
+                        matched_ref = pic_keys[idx]
 
                     if matched_ref and matched_ref in pic_ref_map:
                         data = pic_ref_map[matched_ref]
                         caption = data["caption"]
                         page_no = data["page_no"]
-                        img_info["caption"] = caption or img_info["display_name"]
+                        figure_number = data["figure_number"]
 
-                        if page_no is not None and structured_data and "texts" in structured_data:
-                            nearby_texts = [
-                                t["text"]
-                                for t in structured_data["texts"]
-                                if t["prov"][0].get("page_no") == page_no
-                            ]
-                            img_info["context"] = " ".join(nearby_texts[:3]) if nearby_texts else "No context available"
+                        # Caption formatting
+                        if figure_number and caption:
+                            img_info["caption"] = f"{figure_number}: {caption}"
+                        elif caption:
+                            img_info["caption"] = caption
+                        elif figure_number:
+                            img_info["caption"] = figure_number
+                        else:
+                            img_info["caption"] = img_info["display_name"]
+
+                        # Context extraction
+                        if page_no is not None and structured_data:
+                            img_info["context"] = extract_surrounding_context(
+                                structured_data, page_no, max_chars=800
+                            )
 
                         print(f"[🖼] Caption for {Path(k).name}: {img_info['caption'][:80]}")
                     else:
                         print(f"[⚠] No caption match for {Path(k).name}")
 
                     links.append(img_info)
-                    image_count += 1
+                    total_images_collected += 1
 
-                # ---- Collect PDFs ----
-                for k in try_list(f"{base_dir}/"):
-                    if k.lower().endswith(".pdf"):
-                        pdf_links.append(make_presigned(bucket, k))
-                        print(f"[📄] Added PDF: {k}")
-                        break
+                    # ---- Collect PDFs ----
+                    for k in try_list(f"{base_dir}/"):
+                        if k.lower().endswith(".pdf"):
+                            pdf_info = make_presigned(bucket, k)
+                            # --- Add relevance score if available ---
+                            # If your retrieval or ranking model returns a score per document, attach it here.
+                            # Otherwise, leave None or assign a default.
+                            try:
+                                pdf_info["relevance"] = round(float(score), 3) if "score" in locals() else None
+                            except Exception:
+                                pdf_info["relevance"] = None
+                            pdf_links.append(pdf_info)
+                            print(f"[📄] Added PDF: {k}")
+                            break
+
+
+                # ---- Continue until limit reached ----
+                if total_images_collected >= image_limit:
+                    continue
+
+
+        print(f"[✓] Collected {total_images_collected} images (limit: {image_limit})")
 
         # ---- Save session ----
         state["history"].append({"user": question, "assistant": answer})
@@ -414,7 +547,11 @@ async def query_kb(query: dict, request: Request):
 
     except Exception as e:
         print(f"[❌] Query failed: {e}")
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
+
+
 
 # -----------------------
 # Upload Endpoints
@@ -434,7 +571,6 @@ async def upload_permanent(file: UploadFile = File(...)):
         return {"status": "ok", "path": str(file_path)}
     except Exception as e:
         return {"status": "error", "error": str(e)}
-
 
 @app.post("/upload_temporary")
 async def upload_temporary(request: Request, file: UploadFile = File(...), session_id: str = Form(...)):

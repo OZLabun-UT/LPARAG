@@ -94,16 +94,16 @@ git remote -v
     Figure out how to make it so ppl can make accounts and stuff
     Can we figure out how to see relevant appendices when there's not much nat lang there?
     * Stop multiple of same paper from being in database
-    * Use structured json to find caption
     * Get name that we want to use as domain name
-    * Kill irrelevant images somehow
-        * Kill all upload from first page?
-        * Kill all smaller than a certain size
     * Returned images should be indexed and kept in the llm memory (maybe make them selectable)
-    * Save conversations to the side for people to flip back and forth
     * Keep a version with smaller controlled knowledge base
     * Make toggle for which AI to use 
     * Make tabulated data out of images im2graph
+    * Make it show returned relevance scores
+    * 
+    Done:
+    * Save conversations to the side for people to flip back and forth
+    * Convos saved in local memory
 
 
     
@@ -120,3 +120,4 @@ Restart=always
 
 [Install]
 WantedBy=multi-user.target
+

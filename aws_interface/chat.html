@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <title>Knowledge Base Chat</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="/favicon.png" />
   <style>
     :root {
       --bg:#f5f7fa; --card-bg:#ffffffcc; --accent-bg:#eef2ff;
@@ -20,133 +21,153 @@
     body {
       font-family:'Inter',sans-serif;
       background:var(--bg); color:var(--text);
-      margin:0; min-height:100vh;
-      display:flex; flex-direction:column; align-items:center; justify-content:center;
-      padding:1.5rem; transition:background .3s,color .3s;
+      margin:0; min-height:100vh; display:flex; flex-direction:column;
+      transition:background .3s,color .3s;
     }
-    header{display:flex;justify-content:center;align-items:center;width:100%;margin-bottom:1rem;}
+    header{display:flex;justify-content:center;align-items:center;padding:1rem 0;}
     h1{
       font-family:'Orbitron',sans-serif;font-weight:800;font-size:2.3rem;
       background:linear-gradient(90deg,var(--primary),var(--accent));
       -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-      letter-spacing:.05em;margin:0;text-align:center;
     }
     .toggle{position:absolute;top:1rem;right:1.5rem;background:none;border:none;
             font-size:1.3rem;color:var(--accent);cursor:pointer;transition:transform .2s;}
     .toggle:hover{transform:rotate(15deg);}
-    main{width:100%;max-width:1200px;display:flex;flex-direction:column;align-items:center;gap:1rem;}
-    #chat{
-      background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);
-      box-shadow:var(--shadow);width:100%;height:75vh;overflow-y:auto;
-      padding:1.2rem 1.5rem;backdrop-filter:blur(10px);
-    }
+
+    main{position:relative;display:flex;height:calc(100vh - 80px);width:100%;overflow:hidden;}
+    #sidebar{position:absolute;top:0;left:0;height:100%;width:240px;background:var(--card-bg);
+      border-right:1px solid var(--border);display:flex;flex-direction:column;padding:1rem;
+      box-shadow:var(--shadow);overflow-y:auto;transition:transform .35s ease;z-index:30;}
+    #sidebar.hidden{transform:translateX(-260px);}
+    #sidebarToggle{position:absolute;top:1.2rem;left:1.2rem;width:40px;height:40px;border-radius:999px;
+      border:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--accent),var(--primary));
+      color:white;font-size:1rem;cursor:pointer;box-shadow:0 0 12px rgba(0,0,0,0.3);z-index:50;}
+    #sidebarToggle svg{width:20px;height:20px;transition:transform .35s ease;}
+    #sidebar.hidden + #sidebarToggle svg{transform:rotate(180deg);}
+    #newChatBtn{background:linear-gradient(135deg,var(--accent),var(--primary));color:white;border:none;
+      border-radius:8px;padding:0.6rem 0.8rem;cursor:pointer;margin-bottom:0.8rem;font-weight:600;}
+    #convoTabs{display:flex;flex-direction:column;gap:0.4rem;overflow-y:auto;}
+    .convo-tab{background:var(--accent-bg);color:var(--text);border:1px solid var(--border);
+      border-radius:8px;padding:0.5rem 0.7rem;cursor:pointer;display:flex;justify-content:space-between;}
+    .convo-tab.active{background:var(--accent);color:white;}
+    #chat-area{flex:1;display:flex;flex-direction:column;width:100%;padding:1rem;gap:0.6rem;}
+    #chat{flex:1;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);
+      box-shadow:var(--shadow);overflow-y:auto;padding:1.2rem 1.5rem;}
     .user-msg,.assistant-msg{margin:.6rem 0;padding:.8rem 1rem;border-radius:10px;max-width:85%;}
     .user-msg{background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;margin-left:auto;text-align:right;}
     .assistant-msg{background:var(--accent-bg);color:var(--text);margin-right:auto;}
-    .input-row{
-      display:flex;align-items:center;justify-content:center;
-      background:var(--card-bg);border:1px solid var(--border);
-      border-radius:var(--radius);box-shadow:var(--shadow);
-      width:100%;padding:.8rem 1rem;gap:.6rem;backdrop-filter:blur(10px);
-    }
-    input[type=text],input[type=number]{
-      background:var(--accent-bg);color:var(--text);border:1px solid var(--border);
-      border-radius:8px;padding:.6rem 1rem;font-size:1rem;transition:border .2s;
-    }
+    .input-row{display:flex;align-items:center;justify-content:center;background:var(--card-bg);
+      border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);
+      width:100%;padding:.8rem 1rem;gap:.6rem;}
+    input[type=text],input[type=number]{background:var(--accent-bg);color:var(--text);
+      border:1px solid var(--border);border-radius:8px;padding:.6rem 1rem;font-size:1rem;}
     input[type=text]{flex:1;} input[type=number]{width:60px;text-align:center;}
-    input:focus{border-color:var(--accent);outline:none;}
-    button{
-      padding:.6rem 1rem;background:linear-gradient(135deg,var(--accent),var(--primary));
-      border:none;border-radius:8px;color:white;font-weight:600;cursor:pointer;
-      transition:transform .2s,box-shadow .2s;
-    }
+    button{padding:.6rem 1rem;background:linear-gradient(135deg,var(--accent),var(--primary));
+      border:none;border-radius:8px;color:white;font-weight:600;cursor:pointer;}
     button:hover{transform:translateY(-1px);box-shadow:0 0 8px var(--accent);}
-    .upload-toolbar{display:flex;justify-content:center;align-items:center;gap:1rem;margin-top:.3rem;}
-    .upload-btn{
-      background:var(--accent-bg);color:var(--text);border:1px solid var(--border);
-      border-radius:8px;padding:.45rem .9rem;font-size:.9rem;cursor:pointer;
-      transition:all .2s;display:flex;align-items:center;gap:.4rem;
-    }
-    .upload-btn:hover{background:var(--accent);color:white;transform:translateY(-1px);}
-    .hidden-input{display:none;}
-    .figure-grid{
-      display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-      gap:1rem;margin-top:1rem;
-    }
-    .figure-card{
-      position:relative;background:var(--accent-bg);border:1px solid var(--border);
-      border-radius:10px;overflow:hidden;cursor:pointer;
-      transition:transform .2s,box-shadow .2s;height:230px;display:flex;flex-direction:column;
-    }
+
+    /* Image selection */
+    .figure-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;margin-top:1rem;}
+    .figure-card{position:relative;background:var(--accent-bg);border:1px solid var(--border);
+      border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .2s,box-shadow .2s;height:230px;}
     .figure-card:hover{transform:scale(1.03);box-shadow:0 0 12px var(--accent);}
-    .figure-card img{width:100%;height:100%;object-fit:cover;flex-grow:1;}
-    .figure-overlay{
-      position:absolute;bottom:0;left:0;right:0;
-      background:rgba(0,0,0,0.55);color:#fff;font-size:.85rem;
-      text-align:center;padding:.3rem;opacity:0;transition:opacity .2s;
+    .figure-card.selected-image {
+      outline: 3px solid var(--accent);
+      box-shadow: 0 0 8px var(--accent);
     }
+    .user-msg.image-feedback {
+      font-style: italic;
+      opacity: 0.8;
+    }
+    .figure-card img{width:100%;height:100%;object-fit:cover;}
+    .figure-checkbox{position:absolute;top:8px;left:8px;width:20px;height:20px;z-index:5;cursor:pointer;accent-color:var(--accent);}
+    .figure-checkbox:checked{transform:scale(1.2);}
+    .figure-overlay{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.55);
+      color:#fff;font-size:.85rem;text-align:center;padding:.3rem;opacity:0;transition:opacity .2s;}
     .figure-card:hover .figure-overlay{opacity:1;}
-    #loading,#uploading{display:none;align-items:center;justify-content:center;gap:10px;color:var(--accent);font-weight:500;}
-    .loader{width:18px;height:18px;border:3px solid var(--border);border-top:3px solid var(--accent);
-            border-radius:50%;animation:spin .8s linear infinite;}
-    @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
-    .modal{
-      display:none;position:fixed;z-index:1000;left:0;top:0;width:100%;height:100%;
-      background:rgba(0,0,0,0.7);justify-content:center;align-items:center;
-    }
-    .modal-content{
-      background:var(--card-bg);border-radius:var(--radius);
-      width:80%;max-width:950px;max-height:85vh;box-shadow:var(--shadow);
-      display:flex;flex-direction:column;overflow:hidden;animation:popin .25s ease;
-    }
-    @keyframes popin{from{opacity:0;transform:scale(.95);}to{opacity:1;transform:scale(1);}}
-    .modal img{width:100%;max-height:45vh;object-fit:contain;border-bottom:1px solid var(--border);}
-    .modal-body{flex:1;overflow-y:auto;padding:1rem;}
-    .modal h3{color:var(--accent);font-family:'Inter',sans-serif;margin-bottom:.4rem;}
-    .modal p{color:var(--subtext);font-size:.95rem;line-height:1.5;}
-    .close-btn{align-self:flex-end;margin:.8rem 1rem 0 0;background:var(--accent);
-               color:white;border:none;border-radius:6px;padding:.4rem .8rem;cursor:pointer;}
-    .close-btn:hover{background:var(--primary);}
+
+    /* Modal styles */
+    .modal{display:none;position:fixed;z-index:100;left:0;top:0;width:100%;height:100%;
+      background:rgba(0,0,0,0.85);align-items:center;justify-content:center;}
+    .modal.active{display:flex;}
+    .modal-content{background:var(--card-bg);border-radius:12px;max-width:800px;max-height:90vh;
+      overflow-y:auto;padding:2rem;position:relative;box-shadow:0 0 40px rgba(0,0,0,0.5);}
+    .modal-close{position:absolute;top:1rem;right:1rem;font-size:2rem;color:var(--text);
+      cursor:pointer;background:none;border:none;padding:0;line-height:1;}
+    .modal-close:hover{color:var(--accent);}
+    .modal-image{width:100%;max-height:400px;object-fit:contain;border-radius:8px;margin-bottom:1rem;}
+    .modal-caption{font-size:1.1rem;font-weight:600;margin-bottom:0.8rem;color:var(--text);}
+    .modal-context{font-size:0.95rem;line-height:1.6;color:var(--subtext);}
+      #loading {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--accent);
+    font-weight: 500;
+    margin-bottom: 0.6rem;
+  }
+
+  .loader {
+    width: 18px;
+    height: 18px;
+    border: 3px solid var(--border);
+    border-top: 3px solid var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
   </style>
 </head>
 <body>
   <button id="themeToggle" class="toggle" title="Toggle theme">🌙</button>
   <header><h1>Knowledge Base Chat</h1></header>
+
   <main>
-    <div id="loading"><div class="loader"></div><span>Thinking...</span></div>
-    <div id="uploading"><div class="loader"></div><span>Uploading...</span></div>
-    <div id="chat"></div>
-    <div class="input-row">
-      <input type="text" id="question" placeholder="Ask your question..." />
-      <input type="number" id="imgLimit" min="1" max="20" value="8" />
-      <button onclick="sendMessage()">Send</button>
-    </div>
-    <div class="upload-toolbar">
-      <label class="upload-btn" for="permFileInput">📁 Permanent Upload</label>
-      <input id="permFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('perm')" />
-      <button class="upload-btn" onclick="triggerS3Push()">☁️ S3 Push</button>
-      <button class="upload-btn" onclick="triggerResync()">🧠 Resync KB</button>
-      <label class="upload-btn" for="tempFileInput">📄 Temporary Upload</label>
-      <input id="tempFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('temp')" />
-    </div>
-  </main>
-  <div id="figureModal" class="modal">
-    <div class="modal-content">
-      <button class="close-btn" onclick="closeModal()">Close ✕</button>
-      <img id="modalImage" src="" alt="Figure">
-      <div class="modal-body">
-        <h3 id="modalCaption"></h3>
-        <p id="modalContext"></p>
+    <aside id="sidebar">
+      <button id="newChatBtn">➕ New Chat</button>
+      <div id="convoTabs"></div>
+    </aside>
+    <button id="sidebarToggle" title="Toggle chat list">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/>
+      </svg>
+    </button>
+
+    <section id="chat-area">
+      <div id="loading">
+        <div class="loader"></div>
+        <span>Thinking...</span>
+      </div>      
+      <div id="chat"></div>
+      <div class="input-row">
+        <input type="text" id="question" placeholder="Ask your question..." />
+        <input type="number" id="imgLimit" min="1" max="20" value="8" />
+        <button onclick="sendMessage()">Send</button>
       </div>
+    </section>
+  </main>
+
+  <!-- Modal -->
+  <div id="imageModal" class="modal" onclick="closeModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <img id="modalImage" class="modal-image" src="" alt="Figure">
+      <div id="modalCaption" class="modal-caption"></div>
+      <div id="modalContext" class="modal-context"></div>
     </div>
   </div>
 
   <script>
-    // Theme toggle
     const html=document.documentElement;
     const toggleBtn=document.getElementById('themeToggle');
-    const saved=localStorage.getItem('theme');
-    if(saved==='dark'){html.setAttribute('data-theme','dark');toggleBtn.textContent='☀';}
+    const savedTheme=localStorage.getItem('theme');
+    if(savedTheme==='dark'){html.setAttribute('data-theme','dark');toggleBtn.textContent='☀';}
     toggleBtn.onclick=()=>{
       if(html.getAttribute('data-theme')==='dark'){
         html.removeAttribute('data-theme');toggleBtn.textContent='🌙';localStorage.setItem('theme','light');
@@ -154,110 +175,209 @@
         html.setAttribute('data-theme','dark');toggleBtn.textContent='☀';localStorage.setItem('theme','dark');
       }
     };
-
-    let sessionId=null;
-    async function sendMessage(){
+  
+    const sidebar=document.getElementById('sidebar');
+    const sidebarToggle=document.getElementById('sidebarToggle');
+    sidebarToggle.onclick=()=>{sidebar.classList.toggle('hidden');};
+  
+    let conversations={}, activeSession=null, sessionId=null;
+    let selectedImages = [], lastMessageUsedImages = false;
+  
+    function saveToLocal(){
+      localStorage.setItem("conversations", JSON.stringify(conversations));
+      localStorage.setItem("activeSession", activeSession);
+    }
+  
+    function loadFromLocal(){
+      const saved=localStorage.getItem("conversations");
+      if(saved){
+        conversations=JSON.parse(saved);
+        Object.keys(conversations).forEach((sid,i)=>addConversationTab(sid,"Chat "+(i+1)));
+      }
+      const last=localStorage.getItem("activeSession");
+      if(last && conversations[last]) switchConversation(last);
+    }
+  
+    function addConversationTab(sid,title){
+      const div=document.createElement("div");
+      div.className="convo-tab";div.dataset.sid=sid;
+      div.innerHTML=`<span>${title}</span><button class="delete-tab">🗑</button>`;
+      div.querySelector(".delete-tab").onclick=(e)=>{e.stopPropagation();deleteConversation(sid);};
+      div.onclick=()=>switchConversation(sid);
+      document.getElementById("convoTabs").appendChild(div);
+    }
+  
+    function updateActiveTab(){
+      document.querySelectorAll(".convo-tab").forEach(t=>t.classList.toggle("active",t.dataset.sid===activeSession));
+    }
+  
+    function newConversation(){
+      const id=crypto.randomUUID();
+      conversations[id]="";
+      addConversationTab(id,"Chat "+Object.keys(conversations).length);
+      switchConversation(id);
+      saveToLocal();
+    }
+  
+    function switchConversation(id){
+      activeSession=id;sessionId=id;
+      document.getElementById("chat").innerHTML=conversations[id]||"";
+      updateActiveTab();saveToLocal();
+    }
+  
+    function deleteConversation(id){
+      if(!confirm("Delete this conversation?"))return;
+      delete conversations[id];
+      document.querySelector(`.convo-tab[data-sid='${id}']`)?.remove();
+      if(activeSession===id){
+        const keys=Object.keys(conversations);
+        if(keys.length)switchConversation(keys[0]);
+        else{activeSession=null;sessionId=null;document.getElementById("chat").innerHTML="";}
+      }
+      saveToLocal();
+    }
+  
+    document.getElementById("newChatBtn").onclick=newConversation;
+  
+    // ---------- Modal ----------
+    function openModal(imgUrl, caption, context) {
+      document.getElementById('modalImage').src = imgUrl;
+      document.getElementById('modalCaption').textContent = caption || 'No caption available';
+      document.getElementById('modalContext').textContent = context || 'No context available';
+      document.getElementById('imageModal').classList.add('active');
+    }
+    function closeModal(event) {
+      if (!event || event.target.id === 'imageModal' || event.target.classList.contains('modal-close')) {
+        document.getElementById('imageModal').classList.remove('active');
+      }
+    }
+  
+    // ---------- Messaging ----------
+    async function sendMessage() {
       const q=document.getElementById("question").value.trim();
       const imgLimit=parseInt(document.getElementById("imgLimit").value)||8;
-      if(!q)return;
+      if(!q) return;
+  
       const chatBox=document.getElementById("chat");
-      const loading=document.getElementById("loading");
-      chatBox.innerHTML+=`<div class='user-msg'><strong>You:</strong> ${q}</div>`;
+      chatBox.innerHTML += `<div class='user-msg'><strong>You:</strong> ${q}</div>`;
+      conversations[activeSession] = chatBox.innerHTML;
+      saveToLocal();
+  
+      if(selectedImages.length>0){
+        const count=selectedImages.length;
+        chatBox.innerHTML += `<div class='user-msg image-feedback'>🔎 Sent ${count} image${count>1?"s":""}</div>`;
+        lastMessageUsedImages=true;
+      } else lastMessageUsedImages=false;
+  
       document.getElementById("question").value="";
       chatBox.scrollTop=chatBox.scrollHeight;
-      loading.style.display="flex";
-      try{
-        const res=await fetch("/query",{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({question:q,image_limit:imgLimit,session_id:sessionId})});
-        const data=await res.json();
-        if(!sessionId&&data.session_id)sessionId=data.session_id;
-        let msgHtml="";
-        if(data.error){
-          msgHtml=`<div class='assistant-msg' style='color:#f87171;'>Error: ${data.error}</div>`;
-        } else {
-          msgHtml=`<div class='assistant-msg'><strong>Assistant:</strong> ${data.answer||"(no response)"}`;
-          if(data.pdfs&&data.pdfs.length>0){
-            msgHtml+="<div style='margin-top:0.6rem;'><h4>PDFs:</h4>";
-            for(const pdf of data.pdfs){
-              const name=pdf.display_name||"View PDF";
-              msgHtml+=`<a href='${pdf.url}' target='_blank'
-                style='display:inline-block;margin:0.3rem;padding:0.4rem 0.7rem;
-                background:var(--accent);color:white;border-radius:6px;
-                font-size:0.9rem;text-decoration:none;'>📄 ${name}</a>`;
-            }
-            msgHtml+="</div>";
-          }
-          const imgs=(data.documents||[]).filter(d=>d.mime_type&&d.mime_type.startsWith("image/"));
-          if(imgs.length>0){
-            msgHtml+="<div><h4 style='margin-top:0.8rem;'>Figures:</h4><div class='figure-grid'>";
-            for(const img of imgs){
-              const caption=(img.caption||"No caption").replace(/[`]/g,"'");
-              const context=(img.context||"No context available").replace(/[`]/g,"'").replace(/\n+/g," ");
-              msgHtml+=`
-                <div class='figure-card' onclick='openModal("${img.url}", \`${caption}\`, \`${context}\`)'}>
-                  <img src='${img.url}' alt='Figure'>
-                  <div class='figure-overlay'>Click to view details</div>
+      saveToLocal();
+
+      const loading = document.getElementById("loading");
+      loading.style.display = "flex";
+
+      try {
+        const res = await fetch("/query", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            question: q,
+            image_limit: imgLimit,
+            session_id: sessionId,
+            selected_images: selectedImages
+          })
+        });
+
+        const data = await res.json();
+        if (!sessionId && data.session_id) sessionId = data.session_id;
+
+        let msgHtml = `<div class='assistant-msg'><strong>Assistant:</strong> ${data.answer || "(no response)"}`;
+
+        // ---- FIGURES ----
+        if (!lastMessageUsedImages) {
+          const imgs = (data.documents || []).filter(d => d.mime_type && d.mime_type.startsWith("image/"));
+          if (imgs.length > 0) {
+            msgHtml += "<div><h4 style='margin-top:0.8rem;'>Figures:</h4><div class='figure-grid'>";
+            for (const img of imgs) {
+              const caption = (img.caption || "No caption").replace(/'/g,"&#39;").replace(/"/g,"&quot;");
+              const context = (img.context || "No context available")
+                .replace(/'/g,"&#39;").replace(/"/g,"&quot;").replace(/\n+/g," ");
+              const source = img.source || "";
+              const id = crypto.randomUUID();
+              msgHtml += `
+                <div class='figure-card'>
+                  <input type='checkbox' id='chk-${id}' class='figure-checkbox'
+                    onchange='toggleImageSelect(this, "${img.url}", \`${caption}\`, \`${context}\`, "${source}")' />
+                  <img src='${img.url}' alt='Figure' onclick='openModal("${img.url}", \`${caption}\`, \`${context}\`)' />
+                  <div class='figure-overlay'>Click to view details</div>`;
+              // ---- OPTIONAL RELEVANCE FOR IMAGES ----
+              if (img.relevance !== undefined && img.relevance !== null) {
+                msgHtml += `<div style="font-size:0.85rem;color:var(--subtext);text-align:center;margin-top:0.3rem;">
+                  Relevance: ${img.relevance.toFixed(3)}
                 </div>`;
+              }
+              msgHtml += `</div>`;
             }
-            msgHtml+="</div></div>";
+            msgHtml += "</div></div>";
           }
-          msgHtml+="</div>";
         }
-        chatBox.innerHTML+=msgHtml;
-        chatBox.scrollTop=chatBox.scrollHeight;
-      } catch(err){
-        chatBox.innerHTML+=`<div class='assistant-msg' style='color:#f87171;'>Network error: ${err}</div>`;
-      } finally{loading.style.display="none";}
-    }
 
-    async function uploadFile(type){
-      const fileInput=document.getElementById(type==='perm'?'permFileInput':'tempFileInput');
-      const file=fileInput.files[0]; if(!file)return;
-      const uploading=document.getElementById("uploading"); uploading.style.display="flex";
-      const form=new FormData(); form.append("file",file);
-      if(type==="temp")form.append("session_id",sessionId||"");
-      const endpoint=type==="perm"?"/upload_permanent":"/upload_temporary";
-      try{await fetch(endpoint,{method:"POST",body:form});
-        alert(`${type==='perm'?'Permanent':'Temporary'} upload successful`);
-      }catch(err){alert("Upload failed: "+err);}finally{uploading.style.display="none";}
-    }
+        // ---- PDF REFERENCES ----
+        if (data.pdfs && data.pdfs.length > 0) {
+          msgHtml += "<div style='margin-top:0.6rem;'><h4>PDFs:</h4>";
+          for (const pdf of data.pdfs) {
+            const name = pdf.display_name || "View PDF";
+            const score = pdf.relevance !== undefined && pdf.relevance !== null
+              ? ` <span style="color:var(--subtext);font-size:0.85rem;">(score: ${pdf.relevance.toFixed(3)})</span>`
+              : "";
+            msgHtml += `<div style='margin:0.3rem 0;'>
+              <a href='${pdf.url}' target='_blank'
+                style='display:inline-block;padding:0.4rem 0.7rem;
+                background:var(--accent);color:white;border-radius:6px;
+                font-size:0.9rem;text-decoration:none;'>📄 ${name}</a>${score}
+              </div>`;
+          }
+          msgHtml += "</div>";
+        }
 
-    function openModal(url,cap,ctx){
-      document.getElementById("modalImage").src=url;
-      document.getElementById("modalCaption").innerText=cap;
-      document.getElementById("modalContext").innerText=ctx;
-      document.getElementById("figureModal").style.display="flex";
-    }
-    function closeModal(){document.getElementById("figureModal").style.display="none";}
-    window.onclick=e=>{if(e.target===document.getElementById("figureModal"))closeModal();}
+        // ---- END MESSAGE ----
+        msgHtml += "</div>";
 
-    async function triggerS3Push(){
-      if(!confirm("Run S3 push now? This will delete local chunked files after upload.")) return;
-      document.getElementById("uploading").style.display="flex";
-      try{
-        const res=await fetch("/s3_push",{method:"POST"});
-        const data=await res.json();
-        alert(data.message || "S3 push completed.");
-      }catch(err){
-        alert("S3 push failed: " + err);
-      }finally{
-        document.getElementById("uploading").style.display="none";
+        chatBox.innerHTML += msgHtml;
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        selectedImages = [];
+        document.querySelectorAll(".figure-checkbox").forEach(c => (c.checked = false));
+
+        conversations[activeSession] = chatBox.innerHTML;
+        saveToLocal();
+
+      } catch (err) {
+        chatBox.innerHTML += `<div class='assistant-msg' style='color:#f87171;'>Network error: ${err}</div>`;
+        conversations[activeSession] = chatBox.innerHTML;
+        saveToLocal();
+
+      } finally {
+        loading.style.display = "none";   // ✅ always hide spinner
       }
-    }
 
-    async function triggerResync(){
-      if(!confirm("⚠️ Attention: The chatbot will be down for ~10 minutes while the KB re-syncs. Proceed?")) return;
-      document.getElementById("uploading").style.display="flex";
-      try{
-        const res=await fetch("/resync_kb",{method:"POST"});
-        const data=await res.json();
-        alert(data.message || "Knowledge base resync started.");
-      }catch(err){
-        alert("Resync failed: " + err);
-      }finally{
-        document.getElementById("uploading").style.display="none";
-      }
+      
     }
+  
+    function toggleImageSelect(box,url,caption,context,source){
+      if(box.checked){
+        selectedImages.push({url,caption,context,source});
+        box.parentElement.classList.add("selected-image");
+      } else {
+        selectedImages=selectedImages.filter(img=>img.url!==url);
+        box.parentElement.classList.remove("selected-image");
+      }
+      saveToLocal();
+    }
+  
+    // Initialize
+    loadFromLocal();
   </script>
+  
 </body>
 </html>
