@@ -150,6 +150,16 @@
         <input type="number" id="imgLimit" min="1" max="20" value="8" />
         <button onclick="sendMessage()">Send</button>
       </div>
+
+      <div class="upload-toolbar">
+        <label class="upload-btn" for="permFileInput">📁 Permanent Upload</label>
+        <input id="permFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('perm')" />
+        <button class="upload-btn" onclick="triggerS3Push()">☁️ S3 Push</button>
+        <button class="upload-btn" onclick="triggerResync()">🧠 Resync KB</button>
+        <label class="upload-btn" for="tempFileInput">📄 Temporary Upload</label>
+        <input id="tempFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('temp')" />
+      </div>
+
     </section>
   </main>
 
@@ -375,6 +385,45 @@
       saveToLocal();
     }
   
+    async function uploadFile(type){
+      const fileInput=document.getElementById(type==='perm'?'permFileInput':'tempFileInput');
+      const file=fileInput.files[0]; if(!file)return;
+      const uploading=document.getElementById("uploading"); uploading.style.display="flex";
+      const form=new FormData(); form.append("file",file);
+      if(type==="temp")form.append("session_id",sessionId||"");
+      const endpoint=type==="perm"?"/upload_permanent":"/upload_temporary";
+      try{await fetch(endpoint,{method:"POST",body:form});
+        alert(`${type==='perm'?'Permanent':'Temporary'} upload successful`);
+      }catch(err){alert("Upload failed: "+err);}finally{uploading.style.display="none";}
+    }
+
+    async function triggerS3Push(){
+      if(!confirm("Run S3 push now? This will delete local chunked files after upload.")) return;
+      document.getElementById("uploading").style.display="flex";
+      try{
+        const res=await fetch("/s3_push",{method:"POST"});
+        const data=await res.json();
+        alert(data.message || "S3 push completed.");
+      }catch(err){
+        alert("S3 push failed: " + err);
+      }finally{
+        document.getElementById("uploading").style.display="none";
+      }
+    }
+
+    async function triggerResync(){
+      if(!confirm("⚠️ Attention: The chatbot will be down for ~10 minutes while the KB re-syncs. Proceed?")) return;
+      document.getElementById("uploading").style.display="flex";
+      try{
+        const res=await fetch("/resync_kb",{method:"POST"});
+        const data=await res.json();
+        alert(data.message || "Knowledge base resync started.");
+      }catch(err){
+        alert("Resync failed: " + err);
+      }finally{
+        document.getElementById("uploading").style.display="none";
+      }
+    }
     // Initialize
     loadFromLocal();
   </script>

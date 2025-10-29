@@ -460,27 +460,10 @@ async def query_kb(query: dict, request: Request):
                     img_info = make_presigned(bucket, k)
                     img_info["caption"] = "No caption found"
                     img_info["context"] = "No context available"
+                    img_info["relevance"] = None
 
-                    # --- Add relevance if available ---
-                    # If you have a similarity or retrieval score for this image, attach it here.
-                    # Example: match["score"] if you use FAISS, Pinecone, etc.
-                    if "score" in locals():  # or however your retrieval loop provides it
-                        try:
-                            img_info["relevance"] = round(float(score), 3)
-                        except Exception:
-                            img_info["relevance"] = None
-                    else:
-                        img_info["relevance"] = None
-
-                    links.append(img_info)
-
-
-                    # Try to attach caption/context by matching picture ref
-                    pic_keys = list(pic_ref_map.keys())
-                    matched_ref = None
-                    if idx < len(pic_keys):
-                        matched_ref = pic_keys[idx]
-
+                    # Match with structured.json info if available
+                    matched_ref = list(pic_ref_map.keys())[idx] if idx < len(pic_ref_map) else None
                     if matched_ref and matched_ref in pic_ref_map:
                         data = pic_ref_map[matched_ref]
                         caption = data["caption"]
@@ -497,34 +480,28 @@ async def query_kb(query: dict, request: Request):
                         else:
                             img_info["caption"] = img_info["display_name"]
 
-                        # Context extraction
+                        # Add context if possible
                         if page_no is not None and structured_data:
                             img_info["context"] = extract_surrounding_context(
                                 structured_data, page_no, max_chars=800
                             )
 
-                        print(f"[🖼] Caption for {Path(k).name}: {img_info['caption'][:80]}")
-                    else:
-                        print(f"[⚠] No caption match for {Path(k).name}")
-
+                    print(f"[🖼] Added image: {Path(k).name}")
                     links.append(img_info)
                     total_images_collected += 1
 
-                    # ---- Collect PDFs ----
-                    for k in try_list(f"{base_dir}/"):
-                        if k.lower().endswith(".pdf"):
-                            pdf_info = make_presigned(bucket, k)
-                            # --- Add relevance score if available ---
-                            # If your retrieval or ranking model returns a score per document, attach it here.
-                            # Otherwise, leave None or assign a default.
-                            try:
-                                pdf_info["relevance"] = round(float(score), 3) if "score" in locals() else None
-                            except Exception:
+                    # Add only one PDF per paper
+                    if total_images_collected == 1:
+                        for k in try_list(f"{base_dir}/"):
+                            if k.lower().endswith(".pdf"):
+                                pdf_info = make_presigned(bucket, k)
                                 pdf_info["relevance"] = None
-                            pdf_links.append(pdf_info)
-                            print(f"[📄] Added PDF: {k}")
-                            break
+                                pdf_links.append(pdf_info)
+                                print(f"[📄] Added PDF: {k}")
+                                break
 
+                # mark folder processed
+                processed_folders[base_dir] = True
 
                 # ---- Continue until limit reached ----
                 if total_images_collected >= image_limit:

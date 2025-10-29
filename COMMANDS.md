@@ -100,7 +100,13 @@ git remote -v
     * Make toggle for which AI to use 
     * Make tabulated data out of images im2graph
     * Make it show returned relevance scores
-    * 
+    * Fix ui hide button
+    * Fix metadata being wrapped in caption
+    * Mark junk?
+    * Fix button UI
+    * Everytime low relevance score, prompt user to reformulate and lower threshold
+    * Add help features and tutorials
+
     Done:
     * Save conversations to the side for people to flip back and forth
     * Convos saved in local memory
