@@ -66,7 +66,7 @@ ssh -i rag-instance-actual.pem ubuntu@3.142.186.60
 scp -i  rag-instance-actual.pem .env ubuntu@3.142.186.60:/home/ubuntu/tau-topical-expert/.env
 
 # Update EC2
-
+ssh -i rag-instance-actual.pem ubuntu@3.142.186.60
 cd ~/tau-topical-expert
 git pull origin main
 sudo systemctl restart tau
