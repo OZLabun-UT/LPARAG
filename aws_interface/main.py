@@ -1,5 +1,8 @@
 from fastapi import FastAPI, File, UploadFile, Request, Form
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 from dotenv import load_dotenv
 import os
 import boto3
@@ -15,6 +18,8 @@ import subprocess
 from pdf_chunker.new_chunker import extract_text_for_session
 from io import BytesIO
 from PIL import Image
+from datetime import datetime
+
 
 # -----------------------
 # Environment & paths
@@ -40,6 +45,14 @@ app = FastAPI()
 
 # In-memory state
 session_state = {}
+
+#Favicon 
+BASE_DIR = Path(__file__).parent
+
+# Serve the favicon directly
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(BASE_DIR / "favicon.ico")
 
 # -----------------------
 # Utility Functions
@@ -246,7 +259,6 @@ async def query_kb(query: dict, request: Request):
             f"{chat_context}\n\nRelevant PDF content:\n{pdf_text}"
             f"\n\nSelected Figures for Reference:{image_context}\n\nUser: {question}"
         )
-
         # ---- Query Bedrock ----
         response = bedrock_agent.retrieve_and_generate(
             input={"text": combined_prompt},
@@ -255,6 +267,14 @@ async def query_kb(query: dict, request: Request):
                 "type": "KNOWLEDGE_BASE",
             },
         )
+ 
+
+
+        debug_path = Path("bedrock_debug_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".json")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            json.dump(response, f, indent=2, ensure_ascii=False)
+
+        print(f"[🧠 Saved full Bedrock response to: {debug_path.resolve()}]")
 
         answer = response["output"]["text"]
         citations = response.get("citations", [])
@@ -495,7 +515,12 @@ async def query_kb(query: dict, request: Request):
                         for k in try_list(f"{base_dir}/"):
                             if k.lower().endswith(".pdf"):
                                 pdf_info = make_presigned(bucket, k)
-                                pdf_info["relevance"] = None
+                                if "score" in ref:
+                                    pdf_info["relevance"] = ref["score"]
+                                elif "relevanceScore" in ref:
+                                    pdf_info["relevance"] = ref["relevanceScore"]
+                                else:
+                                    pdf_info["relevance"] = None
                                 pdf_links.append(pdf_info)
                                 print(f"[📄] Added PDF: {k}")
                                 break

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <title>Knowledge Base Chat</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="icon" type="image/png" href="/favicon.ico" />
   <style>
     :root {
       --bg:#f5f7fa; --card-bg:#ffffffcc; --accent-bg:#eef2ff;
@@ -35,17 +35,65 @@
     .toggle:hover{transform:rotate(15deg);}
 
     main{position:relative;display:flex;height:calc(100vh - 80px);width:100%;overflow:hidden;}
-    #sidebar{position:absolute;top:0;left:0;height:100%;width:240px;background:var(--card-bg);
-      border-right:1px solid var(--border);display:flex;flex-direction:column;padding:1rem;
-      box-shadow:var(--shadow);overflow-y:auto;transition:transform .35s ease;z-index:30;}
-    #sidebar.hidden{transform:translateX(-260px);}
-    #sidebarToggle{position:absolute;top:1.2rem;left:1.2rem;width:40px;height:40px;border-radius:999px;
-      border:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--accent),var(--primary));
-      color:white;font-size:1rem;cursor:pointer;box-shadow:0 0 12px rgba(0,0,0,0.3);z-index:50;}
-    #sidebarToggle svg{width:20px;height:20px;transition:transform .35s ease;}
-    #sidebar.hidden + #sidebarToggle svg{transform:rotate(180deg);}
+
+    /* --- Sidebar --- */
+#sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 260px;
+  background: var(--card-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  overflow-y: auto;
+  transform: translateX(0);
+  transition: transform 0.35s ease;
+  z-index: 40;
+}
+
+#sidebar.hidden {
+  transform: translateX(-100%);
+}
+
+/* --- Sidebar toggle --- */
+#sidebarToggle {
+  position: fixed;
+  top: 1.2rem;
+  left: 300px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--primary));
+  color: white;
+  font-size: 1rem;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(0,0,0,0.3);
+  z-index: 100;                /* always above sidebar */
+  transition: left 0.35s ease, transform 0.35s ease;
+}
+
+/* Move toggle when sidebar hidden */
+#sidebar.hidden ~ #sidebarToggle {
+  left: 20px;
+}
+
+#sidebar.hidden ~ #sidebarToggle svg {
+  transform: rotate(180deg);
+}
+
     #newChatBtn{background:linear-gradient(135deg,var(--accent),var(--primary));color:white;border:none;
       border-radius:8px;padding:0.6rem 0.8rem;cursor:pointer;margin-bottom:0.8rem;font-weight:600;}
+
+
+
     #convoTabs{display:flex;flex-direction:column;gap:0.4rem;overflow-y:auto;}
     .convo-tab{background:var(--accent-bg);color:var(--text);border:1px solid var(--border);
       border-radius:8px;padding:0.5rem 0.7rem;cursor:pointer;display:flex;justify-content:space-between;}
@@ -65,6 +113,45 @@
     button{padding:.6rem 1rem;background:linear-gradient(135deg,var(--accent),var(--primary));
       border:none;border-radius:8px;color:white;font-weight:600;cursor:pointer;}
     button:hover{transform:translateY(-1px);box-shadow:0 0 8px var(--accent);}
+
+    .upload-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--primary));
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  text-decoration: none;
+}
+
+.upload-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+.upload-btn:active {
+  transform: scale(0.97);
+}
+
+.hidden-input {
+  display: none;
+}
+
 
     /* Image selection */
     .figure-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;margin-top:1rem;}
@@ -152,13 +239,16 @@
       </div>
 
       <div class="upload-toolbar">
-        <label class="upload-btn" for="permFileInput">📁 Permanent Upload</label>
-        <input id="permFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('perm')" />
+        <label for="permFileInput" class="upload-btn">📁 Permanent Upload</label>
+        <input id="permFileInput" type="file" accept="application/pdf" onchange="uploadFile('perm')" hidden />
+      
         <button class="upload-btn" onclick="triggerS3Push()">☁️ S3 Push</button>
         <button class="upload-btn" onclick="triggerResync()">🧠 Resync KB</button>
-        <label class="upload-btn" for="tempFileInput">📄 Temporary Upload</label>
-        <input id="tempFileInput" type="file" class="hidden-input" accept="application/pdf" onchange="uploadFile('temp')" />
+      
+        <label for="tempFileInput" class="upload-btn">📄 Temporary Upload</label>
+        <input id="tempFileInput" type="file" accept="application/pdf" onchange="uploadFile('temp')" hidden />
       </div>
+      
 
     </section>
   </main>
