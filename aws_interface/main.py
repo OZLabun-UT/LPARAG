@@ -39,6 +39,8 @@ KB_ID = os.getenv("KB_ID")
 REGION = os.getenv("AWS_REGION", "us-east-2")
 MODEL_ARN = os.getenv("MODEL_ARN")
 
+debug=False
+
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 app = FastAPI()
@@ -225,333 +227,322 @@ def is_large_enough(bucket, key, min_size=90):
         print(f"[!] Could not read dimensions for {key}: {e}")
         return False
 
-# -----------------------
-# Query Endpoint
-# -----------------------
 @app.post("/query")
 async def query_kb(query: dict, request: Request):
+    """
+    Main endpoint: builds context, queries Bedrock retrieve(),
+    processes structured JSON + figures, and returns PDFs with relevance scores.
+    """
     try:
         session_id = query.get("session_id") or str(uuid4())
         state = session_state.setdefault(session_id, {"history": [], "citations": [], "temp_pdfs": []})
         question = query["question"]
         image_limit = int(query.get("image_limit", 8))
 
-        # ---- Context ----
-        chat_context = "\n".join(
-            [f"User: {h['user']}\nAssistant: {h['assistant']}" for h in state["history"][-3:]]
-        )
-        pdf_text = "\n\n".join([pdf["text"][:5000] for pdf in state["temp_pdfs"]])
+        # 1️⃣ Build prompt context
+        combined_prompt = build_context(state, question, query)
 
-        selected_images = query.get("selected_images", [])
-        image_context = ""
-        if selected_images:
-            for i, img in enumerate(selected_images, 1):
-                image_context += (
-                    f"\n\n[Image {i}]\n"
-                    f"Caption: {img.get('caption')}\n"
-                    f"Context: {img.get('context')}\n"
-                    f"Source: {img.get('source')}\n"
-                    f"NOTE: User has selected this image for reference. "
-                    f"Use the caption and context to answer questions about this figure."
-                )
-
-        combined_prompt = (
-            f"{chat_context}\n\nRelevant PDF content:\n{pdf_text}"
-            f"\n\nSelected Figures for Reference:{image_context}\n\nUser: {question}"
-        )
-        # ---- Query Bedrock ----
-        response = bedrock_agent.retrieve_and_generate(
-            input={"text": combined_prompt},
-            retrieveAndGenerateConfiguration={
-                "knowledgeBaseConfiguration": {"knowledgeBaseId": KB_ID, "modelArn": MODEL_ARN},
-                "type": "KNOWLEDGE_BASE",
-            },
-        )
- 
+        # 2️⃣ Run Bedrock retrieval
+        response = run_retrieval(question)
+        retrievals = response.get("retrievalResults", [])
+        generated_answer = run_generation(question, retrievals)
 
 
-        debug_path = Path("bedrock_debug_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".json")
-        with open(debug_path, "w", encoding="utf-8") as f:
-            json.dump(response, f, indent=2, ensure_ascii=False)
+        # 3️⃣ Process each retrieved paper
+        all_links, pdf_links, total_images = [], [], 0
+        processed_folders = set()
 
-        print(f"[🧠 Saved full Bedrock response to: {debug_path.resolve()}]")
+        for r_idx, result in enumerate(retrievals):
+            s3_uri = result.get("location", {}).get("s3Location", {}).get("uri")
+            score = result.get("score", 0.0)
+            if not s3_uri:
+                continue
 
-        answer = response["output"]["text"]
-        citations = response.get("citations", [])
-        links, pdf_links, processed_folders = [], [], {}
-        total_images_collected = 0
+            bucket, key = parse_s3_uri(s3_uri)
+            if not (bucket and key):
+                continue
 
-        # ---- Utility helpers ----
-        def get_base_dir_from_key(key: str):
-            """
-            Determine the base directory for a given S3 key.
-            Compatible with both old and new folder layouts.
-            """
-            parts = key.split("/")
-            # Handle common patterns
-            if "chunks" in parts:
-                idx = parts.index("chunks")
-                return "/".join(parts[:idx])
-            if "structured.json" in parts:
-                return "/".join(parts[:-1])
-            if "output" in parts:
-                idx = parts.index("output")
-                return "/".join(parts[:idx])
-            if "images" in parts:
-                idx = parts.index("images")
-                return "/".join(parts[:idx])
-            return "/".join(parts[:3])
+            base_dir = "/".join(key.split("/")[:-1])
+            if base_dir in processed_folders:
+                continue
+            processed_folders.add(base_dir)
 
+            # Process one full paper (structured.json + figures + pdf)
+            links, pdfs, img_count = process_paper(bucket, base_dir, score, image_limit - total_images)
+            all_links.extend(links)
+            pdf_links.extend(pdfs)
+            total_images += img_count
 
-        def find_all_images(bucket, prefix):
-            """
-            List all image objects (.png, .jpg, .jpeg, .svg) under a given S3 prefix.
-            Includes robust pagination to ensure all images are returned.
-            """
-            found = []
-            continuation_token = None
-            try:
-                while True:
-                    kwargs = {"Bucket": bucket, "Prefix": prefix}
-                    if continuation_token:
-                        kwargs["ContinuationToken"] = continuation_token
-                    resp = s3.list_objects_v2(**kwargs)
-                    for obj in resp.get("Contents", []):
-                        key = obj["Key"]
-                        if key.lower().endswith((".png", ".jpg", ".jpeg", ".svg")):
-                            found.append(key)
-                    if resp.get("IsTruncated"):
-                        continuation_token = resp.get("NextContinuationToken")
-                    else:
-                        break
-            except Exception as e:
-                print(f"[!] Error listing {prefix}: {e}")
-            return found
+            if total_images >= image_limit:
+                break
 
-
-        def try_list(prefix):
-            try:
-                resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-                return [obj["Key"] for obj in resp.get("Contents", [])]
-            except Exception:
-                return []
-
-        def extract_surrounding_context(structured_data, page_no, max_chars=800):
-            """Extract richer context from the same page and adjacent pages."""
-            if not structured_data or "texts" not in structured_data:
-                return "No context available"
-            
-            # Collect texts from target page and adjacent pages
-            relevant_texts = []
-            for text_obj in structured_data["texts"]:
-                if not text_obj.get("prov"):
-                    continue
-                text_page = text_obj["prov"][0].get("page_no")
-                # Include same page and ±1 pages
-                if text_page is not None and abs(text_page - page_no) <= 1:
-                    relevant_texts.append({
-                        "page": text_page,
-                        "text": text_obj["text"],
-                        "label": text_obj.get("label", "")
-                    })
-            
-            # Sort by page number
-            relevant_texts.sort(key=lambda x: x["page"])
-            
-            # Build context prioritizing section headers and nearby text
-            context_parts = []
-            total_chars = 0
-            
-            # First pass: add section headers
-            for t in relevant_texts:
-                if t["label"] in ["section_header", "title"] and total_chars < max_chars:
-                    context_parts.append(f"[{t['label'].upper()}] {t['text']}")
-                    total_chars += len(t['text'])
-            
-            # Second pass: add regular text from the same page
-            for t in relevant_texts:
-                if t["page"] == page_no and t["label"] not in ["section_header", "title"] and total_chars < max_chars:
-                    text_snippet = t["text"][:max_chars - total_chars]
-                    context_parts.append(text_snippet)
-                    total_chars += len(text_snippet)
-                    if total_chars >= max_chars:
-                        break
-            
-            return " ".join(context_parts) if context_parts else "No context available"
-
-        # -------- MAIN LOOP --------
-        for citation in citations:
-            for ref in citation.get("retrievedReferences", []):
-                s3_uri = ref["location"]["s3Location"]["uri"]
-                bucket, key = parse_s3_uri(s3_uri)
-                if not (bucket and key):
-                    continue
-
-                base_dir = get_base_dir_from_key(key)
-                if base_dir in processed_folders:
-                    continue
-                processed_folders[base_dir] = True
-
-                # ---- Add cited reference ----
-                if not (key.lower().endswith(".json") or key.lower().endswith(".txt")):
-                    links.append(make_presigned(bucket, key))
-
-                # ---- Load structured.json ----
-                structured_key = f"{base_dir}/structured.json"
-                structured_data = None
-                try:
-                    obj = s3.get_object(Bucket=bucket, Key=structured_key)
-                    structured_data = json.loads(obj["Body"].read())
-                    print(f"[📄] Loaded structured.json for {base_dir}")
-                except Exception as e:
-                    print(f"[!] No structured.json found for {base_dir}: {e}")
-
-                text_map = {}
-                if structured_data and "texts" in structured_data:
-                    text_map = {t["self_ref"]: t for t in structured_data["texts"]}
-
-                # ---- Find ALL images first ----
-                paper_name = Path(base_dir).name
-                possible_prefixes = [
-                    f"{base_dir}/output/{paper_name}/images/",
-                    f"{base_dir}/output/images/",
-                    f"{base_dir}/{paper_name}/images/",
-                    f"{base_dir}/images/",
-                ]
-                all_image_keys = []
-                for prefix in possible_prefixes:
-                    all_image_keys.extend(find_all_images(bucket, prefix))
-
-                # ---- Filter images by size ----
-                valid_images = []
-                for k in sorted(set(all_image_keys)):
-                    if is_large_enough(bucket, k, min_size=90):  # Lower threshold back to 90
-                        valid_images.append(k)
-                    else:
-                        print(f"[⏭] Skipping small image: {k}")
-
-                print(f"[📂] Found {len(valid_images)} valid images under {base_dir}")
-
-                # ---- Build picture map with enhanced captions ----
-                pic_ref_map = {}
-                if structured_data and "pictures" in structured_data:
-                    for pic in structured_data["pictures"]:
-                        caption = ""
-                        page_no = None
-                        figure_number = ""
-
-                        # Extract figure number
-                        if pic.get("label"):
-                            figure_number = pic["label"]
-
-                        # Try caption-labeled text
-                        if pic.get("children"):
-                            for child in pic["children"]:
-                                ref = child.get("$ref")
-                                if ref and ref in text_map:
-                                    child_obj = text_map[ref]
-                                    if child_obj.get("label") == "caption":
-                                        caption = child_obj["text"].strip()
-                                        break
-
-                        # Fallback: first child text
-                        if not caption and pic.get("children"):
-                            for child in pic["children"]:
-                                ref = child.get("$ref")
-                                if ref and ref in text_map:
-                                    caption = text_map[ref]["text"].strip()
-                                    break
-
-                        if pic.get("prov"):
-                            page_no = pic["prov"][0].get("page_no", None)
-
-                        pic_ref_map[pic["self_ref"]] = {
-                            "caption": caption,
-                            "page_no": page_no,
-                            "figure_number": figure_number
-                        }
-
-                # ---- Calculate how many images we can add from this paper ----
-                remaining_slots = image_limit - total_images_collected
-                images_to_add = valid_images[:remaining_slots]
-
-                # ---- Add image objects with enhanced metadata ----
-                for idx, k in enumerate(images_to_add):
-                    img_info = make_presigned(bucket, k)
-                    img_info["caption"] = "No caption found"
-                    img_info["context"] = "No context available"
-                    img_info["relevance"] = None
-
-                    # Match with structured.json info if available
-                    matched_ref = list(pic_ref_map.keys())[idx] if idx < len(pic_ref_map) else None
-                    if matched_ref and matched_ref in pic_ref_map:
-                        data = pic_ref_map[matched_ref]
-                        caption = data["caption"]
-                        page_no = data["page_no"]
-                        figure_number = data["figure_number"]
-
-                        # Caption formatting
-                        if figure_number and caption:
-                            img_info["caption"] = f"{figure_number}: {caption}"
-                        elif caption:
-                            img_info["caption"] = caption
-                        elif figure_number:
-                            img_info["caption"] = figure_number
-                        else:
-                            img_info["caption"] = img_info["display_name"]
-
-                        # Add context if possible
-                        if page_no is not None and structured_data:
-                            img_info["context"] = extract_surrounding_context(
-                                structured_data, page_no, max_chars=800
-                            )
-
-                    print(f"[🖼] Added image: {Path(k).name}")
-                    links.append(img_info)
-                    total_images_collected += 1
-
-                    # Add only one PDF per paper
-                    if total_images_collected == 1:
-                        for k in try_list(f"{base_dir}/"):
-                            if k.lower().endswith(".pdf"):
-                                pdf_info = make_presigned(bucket, k)
-                                if "score" in ref:
-                                    pdf_info["relevance"] = ref["score"]
-                                elif "relevanceScore" in ref:
-                                    pdf_info["relevance"] = ref["relevanceScore"]
-                                else:
-                                    pdf_info["relevance"] = None
-                                pdf_links.append(pdf_info)
-                                print(f"[📄] Added PDF: {k}")
-                                break
-
-                # mark folder processed
-                processed_folders[base_dir] = True
-
-                # ---- Continue until limit reached ----
-                if total_images_collected >= image_limit:
-                    continue
-
-
-        print(f"[✓] Collected {total_images_collected} images (limit: {image_limit})")
-
-        # ---- Save session ----
+        # 4️⃣ Compose response
+        answer = generated_answer 
         state["history"].append({"user": question, "assistant": answer})
-        state["citations"].extend(citations)
+        state["citations"].extend(all_links)
 
         return {
             "session_id": session_id,
             "answer": answer,
-            "documents": links,
+            "documents": all_links,
             "pdfs": pdf_links,
-            "citations": citations,
+            "citations": all_links,
         }
 
     except Exception as e:
         print(f"[❌] Query failed: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return {"error": str(e)}
+
+
+# ============================================================
+# --------------------- HELPER FUNCTIONS ----------------------
+# ============================================================
+
+def build_context(state, question, query):
+    """Combine chat, PDFs, and selected images into a unified text context."""
+    chat_context = "\n".join(
+        [f"User: {h['user']}\nAssistant: {h['assistant']}" for h in state["history"][-3:]]
+    )
+    pdf_text = "\n\n".join([pdf["text"][:5000] for pdf in state["temp_pdfs"]])
+
+    image_context = ""
+    for i, img in enumerate(query.get("selected_images", []), 1):
+        image_context += (
+            f"\n\n[Image {i}]\nCaption: {img.get('caption')}\nContext: {img.get('context')}\n"
+            f"Source: {img.get('source')}\nNOTE: User selected this image."
+        )
+
+    return (
+        f"{chat_context}\n\nRelevant PDF content:\n{pdf_text}"
+        f"\n\nSelected Figures for Reference:{image_context}\n\nUser: {question}"
+    )
+
+
+def run_retrieval(question):
+    """Call Bedrock retrieve() API and dump full JSON to disk."""
+    response = bedrock_agent.retrieve(
+        knowledgeBaseId=KB_ID,
+        retrievalQuery={"text": question},
+    )
+    if debug:
+        debug_path = Path(f"bedrock_debug_{datetime.now():%Y%m%d_%H%M%S}.json")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            json.dump(response, f, indent=2, ensure_ascii=False)
+        print(f"[🧠 Saved full Bedrock response to: {debug_path.resolve()}]")
+    return response
+
+
+def process_paper(bucket, base_dir, score, remaining_slots):
+    """Handles one paper’s structured.json, figures, and PDF extraction."""
+    links, pdf_links, total_added = [], [], 0
+
+    structured_data = load_structured_json(bucket, base_dir)
+    text_map = {t["self_ref"]: t for t in structured_data.get("texts", [])} if structured_data else {}
+    pic_map = extract_caption_and_context(structured_data, text_map)
+
+    valid_images = find_images_for_paper(bucket, base_dir)
+    if not valid_images:
+        print(f"[📂] No valid images under {base_dir}")
+
+    for idx, key in enumerate(valid_images[:remaining_slots]):
+        img_info = make_presigned(bucket, key)
+        img_info.update(pic_map.get(idx, {"caption": "No caption", "context": "No context"}))
+        img_info["relevance"] = round(float(score), 3)
+        links.append(img_info)
+        total_added += 1
+        print(f"[🖼] Added image: {Path(key).name}")
+
+    # Add one PDF per paper
+    pdf_info = find_pdf_for_paper(bucket, base_dir, score)
+    if pdf_info:
+        pdf_links.append(pdf_info)
+
+    return links, pdf_links, total_added
+
+
+def load_structured_json(bucket, base_dir):
+    """Loads structured.json for the given paper, if present."""
+    key = f"{base_dir}/structured.json"
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        data = json.loads(obj["Body"].read())
+        print(f"[📄] Loaded structured.json for {base_dir}")
+        return data
+    except Exception as e:
+        print(f"[!] No structured.json found for {base_dir}: {e}")
+        return {}
+
+
+def find_images_for_paper(bucket, base_dir):
+    """Collects all valid image keys across several common paths."""
+    paper_name = Path(base_dir).name
+    prefixes = [
+        f"{base_dir}/output/{paper_name}/images/",
+        f"{base_dir}/output/images/",
+        f"{base_dir}/{paper_name}/images/",
+        f"{base_dir}/images/",
+    ]
+    found = []
+    for prefix in prefixes:
+        try:
+            resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            for obj in resp.get("Contents", []):
+                k = obj["Key"]
+                if k.lower().endswith((".png", ".jpg", ".jpeg", ".svg")) and is_large_enough(bucket, k, 90):
+                    found.append(k)
+        except Exception:
+            continue
+    return sorted(set(found))
+
+# CURRENTLY UNUSED
+def extract_images_from_retrievals(retrievals, image_limit):
+    """Extract image entries directly from Bedrock retrievalResults."""
+    img_links = []
+    seen_sources = set()
+
+    for result in retrievals:
+        score = result.get("score", 0.0)
+        content = result.get("content", {})
+        if not isinstance(content, dict):
+            continue
+
+        # Detect byteContent or imageBase64 entries
+        if "byteContent" in content:
+            img_data = content["byteContent"]
+            # Some Bedrock APIs return inline base64 data
+            img_links.append({
+                "source": "inline_bedrock",
+                "url": img_data,  # already data:image/png;base64,...
+                "mime_type": "image/png",
+                "display_name": "Retrieved Image",
+                "caption": content.get("text", "No caption"),
+                "context": "Returned directly by Bedrock retrieval",
+                "relevance": round(float(score), 3),
+            })
+            seen_sources.add(img_data[:100])  # avoid duplicates by prefix hash
+
+        # If the result points to an S3 image file directly
+        loc = result.get("location", {}).get("s3Location", {})
+        uri = loc.get("uri")
+        if uri and any(uri.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".svg"]):
+            bucket, key = parse_s3_uri(uri)
+            if not (bucket and key):
+                continue
+            if key in seen_sources:
+                continue
+            seen_sources.add(key)
+            img_info = make_presigned(bucket, key)
+            img_info["caption"] = content.get("text", "No caption")
+            img_info["context"] = "Returned directly by Bedrock retrieval"
+            img_info["relevance"] = round(float(score), 3)
+            img_links.append(img_info)
+
+        if len(img_links) >= image_limit:
+            break
+
+    return img_links
+
+
+def extract_caption_and_context(structured_data, text_map, max_chars=800):
+    """Reconstruct captions and context for figures using structured.json."""
+    if not structured_data or "pictures" not in structured_data:
+        return {}
+
+    result = {}
+    for idx, pic in enumerate(structured_data["pictures"]):
+        caption = None
+        page_no = None
+        fig_num = pic.get("label", "")
+        if pic.get("children"):
+            for child in pic["children"]:
+                ref = child.get("$ref")
+                if ref and ref in text_map:
+                    t = text_map[ref]
+                    if t.get("label") == "caption":
+                        caption = t["text"].strip()
+                        break
+            if not caption:
+                for child in pic["children"]:
+                    ref = child.get("$ref")
+                    if ref and ref in text_map:
+                        caption = text_map[ref]["text"].strip()
+                        break
+        if pic.get("prov"):
+            page_no = pic["prov"][0].get("page_no")
+
+        context = extract_surrounding_context(structured_data, page_no, max_chars)
+        result[idx] = {
+            "caption": f"{fig_num}: {caption}" if caption and fig_num else caption or "No caption",
+            "context": context,
+        }
+    return result
+
+
+def extract_surrounding_context(structured_data, page_no, max_chars=800):
+    """Extract nearby text from same/adjacent pages for figure context."""
+    if not structured_data or "texts" not in structured_data:
+        return "No context available"
+    relevant = [
+        t["text"] for t in structured_data["texts"]
+        if t.get("prov") and abs(t["prov"][0].get("page_no", -1) - page_no) <= 1
+    ]
+    joined = " ".join(relevant)[:max_chars]
+    return joined if joined else "No context available"
+
+
+def find_pdf_for_paper(bucket, base_dir, score):
+    """Locate the PDF file for a paper."""
+    try:
+        resp = s3.list_objects_v2(Bucket=bucket, Prefix=base_dir)
+        for obj in resp.get("Contents", []):
+            if obj["Key"].lower().endswith(".pdf"):
+                pdf_info = make_presigned(bucket, obj["Key"])
+                pdf_info["relevance"] = round(float(score), 3)
+                print(f"[📄] Added PDF {pdf_info['display_name']} (score={pdf_info['relevance']})")
+                return pdf_info
+    except Exception as e:
+        print(f"[!] Could not list {base_dir}: {e}")
+    return None
+
+
+def format_answer(pdf_links):
+    """Format textual summary of retrieved PDFs and scores."""
+    if not pdf_links:
+        return "No documents retrieved."
+    lines = [
+        f"{i+1}. {pdf['display_name']} (score: {pdf.get('relevance',0):.3f})"
+        for i, pdf in enumerate(pdf_links[:5])
+    ]
+    return "Top retrieved references:\n" + "\n".join(lines)
+
+
+def run_generation(question: str, retrieved_chunks: list) -> str:
+    """Retrieve and generate in one call; return answer text and retrieved refs."""
+    response = bedrock_agent.retrieve_and_generate(
+        input={"text": question},
+        retrieveAndGenerateConfiguration={
+            "type": "KNOWLEDGE_BASE",
+            "knowledgeBaseConfiguration": {
+                "knowledgeBaseId": KB_ID,
+                "modelArn": MODEL_ARN,
+            },
+        },
+    )
+
+    # save debug dump if needed
+    if(debug):
+        debug_path = Path(f"bedrock_debug_{datetime.now():%Y%m%d_%H%M%S}.json")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            json.dump(response, f, indent=2, ensure_ascii=False)
+        print(f"[🧠 Saved full Bedrock response to: {debug_path.resolve()}]")
+
+    answer = response.get("output", {}).get("text", "")
+    citations = response.get("citations", [])
+    retrievals = []
+    for c in citations:
+        retrievals.extend(c.get("retrievedReferences", []))
+    return answer
 
 
 
