@@ -71,6 +71,8 @@ cd ~/tau-topical-expert
 git pull origin main
 sudo systemctl restart tau
 
+OR: just use the update_ec2.sh executable
+
 # Github
 
 See origins:

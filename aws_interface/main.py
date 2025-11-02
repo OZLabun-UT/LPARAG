@@ -200,7 +200,6 @@ async def s3_push():
     except subprocess.CalledProcessError as e:
         return {"status": "error", "message": f"S3 push failed: {e}"}
 
-
 @app.post("/resync_kb")
 async def resync_kb():
     try:
@@ -294,7 +293,6 @@ async def query_kb(query: dict, request: Request):
         import traceback; traceback.print_exc()
         return {"error": str(e)}
 
-
 # ============================================================
 # --------------------- HELPER FUNCTIONS ----------------------
 # ============================================================
@@ -317,7 +315,6 @@ def build_context(state, question, query):
         f"{chat_context}\n\nRelevant PDF content:\n{pdf_text}"
         f"\n\nSelected Figures for Reference:{image_context}\n\nUser: {question}"
     )
-
 
 def run_retrieval(question):
     """Call Bedrock retrieve() API and dump full JSON to disk."""
@@ -546,6 +543,7 @@ def run_generation(question: str, retrieved_chunks: list) -> str:
 
 
 
+
 # -----------------------
 # Upload Endpoints
 # -----------------------
@@ -577,6 +575,90 @@ async def upload_temporary(request: Request, file: UploadFile = File(...), sessi
         return {"status": "ok", "filename": file.filename, "chunk_count": len(extracted_text.split("\n\n"))}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# ============================================================
+# ---------------------- BATCH UPLOAD PAGE --------------------
+# ============================================================
+
+@app.get("/batch_upload", response_class=HTMLResponse)
+def serve_batch_upload_ui():
+    """Serve batch upload UI page."""
+    return open(Path(__file__).resolve().parent / "batch_upload.html").read()
+
+
+@app.post("/upload_batch")
+async def upload_batch(request: Request, files: list[UploadFile] = File(...)):
+    """
+    Accepts multiple PDFs, checks for duplicates, and uploads
+    each into an appropriate S3 bucket (<30 papers each).
+    """
+    try:
+        from pdf_chunker.s3_push import get_md5, s3_object_md5, sync_to_s3
+        from pdf_chunker.new_chunker import extract_with_docling
+
+        bucket_base = os.getenv("PDF_BUCKET_BASE", "tau-papers")
+        s3 = boto3.client("s3", region_name=REGION)
+        uploaded, skipped = [], []
+
+        # 1️⃣ Identify all existing buckets starting with base prefix
+        existing_buckets = [
+            b["Name"] for b in s3.list_buckets()["Buckets"]
+            if b["Name"].startswith(bucket_base)
+        ]
+
+        def get_available_bucket():
+            for b in existing_buckets:
+                resp = s3.list_objects_v2(Bucket=b)
+                if resp.get("KeyCount", 0) < 30:
+                    return b
+            # none under limit → make new
+            new_bucket = f"{bucket_base}-{len(existing_buckets)+1}"
+            s3.create_bucket(Bucket=new_bucket, CreateBucketConfiguration={"LocationConstraint": REGION})
+            existing_buckets.append(new_bucket)
+            return new_bucket
+
+        # 2️⃣ Process uploads
+        for file in files:
+            tmp_path = UPLOAD_DIR / file.filename
+            with open(tmp_path, "wb") as buf:
+                shutil.copyfileobj(file.file, buf)
+
+            md5 = get_md5(tmp_path)
+            duplicate_found = False
+
+            for b in existing_buckets:
+                resp = s3.list_objects_v2(Bucket=b)
+                for obj in resp.get("Contents", []):
+                    if obj["Key"].lower().endswith(".pdf"):
+                        if s3_object_md5(b, obj["Key"]) == md5:
+                            skipped.append(file.filename)
+                            duplicate_found = True
+                            break
+                if duplicate_found:
+                    break
+
+            if duplicate_found:
+                continue
+
+            # 3️⃣ Chunk and upload
+            extract_with_docling(tmp_path, OUTPUT_DIR)
+            bucket = get_available_bucket()
+            sync_to_s3(OUTPUT_DIR / tmp_path.stem, bucket_name=bucket)
+            uploaded.append({"file": file.filename, "bucket": bucket})
+
+        return {
+            "status": "ok",
+            "uploaded": uploaded,
+            "skipped": skipped,
+            "message": f"Uploaded {len(uploaded)}, skipped {len(skipped)} duplicates."
+        }
+
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+
+
 
 # -----------------------
 # Run

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Batch Upload Papers</title>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0d1117;
+      color: #f3f4f6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .container {
+      background: #1e2531;
+      padding: 2rem 3rem;
+      border-radius: 14px;
+      box-shadow: 0 0 25px rgba(0,0,0,0.4);
+      width: 500px;
+      text-align: center;
+    }
+    input[type=file] {
+      width: 100%;
+      padding: .8rem;
+      margin-top: 1rem;
+      border: none;
+      border-radius: 8px;
+      background: #2c3442;
+      color: #f3f4f6;
+    }
+    button {
+      margin-top: 1.5rem;
+      padding: 0.8rem 1.2rem;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #7c3aed, #2563eb);
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 1rem;
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>📦 Batch Upload Papers</h2>
+    <p>Upload multiple PDFs to the knowledge base at once.</p>
+    <input id="batchFiles" type="file" multiple accept="application/pdf"/>
+    <button onclick="uploadBatch()">Upload</button>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    async function uploadBatch() {
+      const files = document.getElementById("batchFiles").files;
+      if (!files.length) return alert("Select at least one PDF.");
+
+      const form = new FormData();
+      for (const f of files) form.append("files", f);
+
+      document.getElementById("status").textContent = "Uploading...";
+      try {
+        const res = await fetch("/upload_batch", { method: "POST", body: form });
+        const data = await res.json();
+        if (data.status === "ok") {
+          document.getElementById("status").innerHTML =
+            `✅ ${data.message}<br><br>Uploaded: ${data.uploaded.map(x=>x.file).join(", ") || "none"}<br>Skipped: ${data.skipped.join(", ") || "none"}`;
+        } else {
+          document.getElementById("status").textContent = "❌ Error: " + data.message;
+        }
+      } catch (err) {
+        document.getElementById("status").textContent = "Network error: " + err;
+      }
+    }
+  </script>
+</body>
+</html>

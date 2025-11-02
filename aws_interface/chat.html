@@ -247,6 +247,7 @@
       
         <label for="tempFileInput" class="upload-btn">📄 Temporary Upload</label>
         <input id="tempFileInput" type="file" accept="application/pdf" onchange="uploadFile('temp')" hidden />
+        <button class="upload-btn" onclick="openBatchUpload()">📦 Batch Upload Page</button>
       </div>
       
 
@@ -512,6 +513,11 @@
         document.getElementById("uploading").style.display="none";
       }
     }
+
+    function openBatchUpload() {
+    window.location.href = "/batch_upload";
+    }
+
 
     async function triggerResync(){
       if(!confirm("⚠️ Attention: The chatbot will be down for ~10 minutes while the KB re-syncs. Proceed?")) return;
