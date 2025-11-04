@@ -590,35 +590,56 @@ def serve_batch_upload_ui():
 @app.post("/upload_batch")
 async def upload_batch(request: Request, files: list[UploadFile] = File(...)):
     """
-    Accepts multiple PDFs, checks for duplicates, and uploads
-    each into an appropriate S3 bucket (<30 papers each).
+    Upload PDFs into tau-papers-N/kb-data/ folders.
+    Each bucket's kb-data/ can hold up to 30 paper folders before a new bucket is created.
     """
     try:
         from pdf_chunker.s3_push import get_md5, s3_object_md5, sync_to_s3
         from pdf_chunker.new_chunker import extract_with_docling
 
-        bucket_base = os.getenv("PDF_BUCKET_BASE", "tau-papers")
-        s3 = boto3.client("s3", region_name=REGION)
+        base_name = os.getenv("PDF_BUCKET_BASE", "tau-papers")
+        region = os.getenv("AWS_REGION", "us-east-2")
+        s3 = boto3.client("s3", region_name=region)
+
         uploaded, skipped = [], []
 
-        # 1️⃣ Identify all existing buckets starting with base prefix
-        existing_buckets = [
+        # --- 1️⃣ List all existing tau-papers-N buckets ---
+        buckets = [
             b["Name"] for b in s3.list_buckets()["Buckets"]
-            if b["Name"].startswith(bucket_base)
+            if b["Name"].startswith(base_name)
         ]
+        buckets.sort(key=lambda b: int(b.replace(base_name + "-", "")))
 
+        # --- 2️⃣ Helper: count subfolders in kb-data/ ---
+        def count_kb_data(bucket):
+            try:
+                resp = s3.list_objects_v2(Bucket=bucket, Prefix="kb-data/", Delimiter="/")
+                prefixes = [p["Prefix"] for p in resp.get("CommonPrefixes", [])]
+                return len(prefixes)
+            except Exception as e:
+                print(f"[!] Could not count in {bucket}: {e}")
+                return 9999  # assume full if error
+
+        # --- 3️⃣ Helper: pick or create bucket ---
         def get_available_bucket():
-            for b in existing_buckets:
-                resp = s3.list_objects_v2(Bucket=b)
-                if resp.get("KeyCount", 0) < 30:
+            for b in buckets:
+                count = count_kb_data(b)
+                print(f"[{b}] has {count} folders")
+                if count < 30:
                     return b
-            # none under limit → make new
-            new_bucket = f"{bucket_base}-{len(existing_buckets)+1}"
-            s3.create_bucket(Bucket=new_bucket, CreateBucketConfiguration={"LocationConstraint": REGION})
-            existing_buckets.append(new_bucket)
+
+            # all full → make a new one
+            new_index = len(buckets) + 1
+            new_bucket = f"{base_name}-{new_index}"
+            print(f"[+] Creating new bucket: {new_bucket}")
+            s3.create_bucket(
+                Bucket=new_bucket,
+                CreateBucketConfiguration={"LocationConstraint": region}
+            )
+            buckets.append(new_bucket)
             return new_bucket
 
-        # 2️⃣ Process uploads
+        # --- 4️⃣ Process each uploaded file ---
         for file in files:
             tmp_path = UPLOAD_DIR / file.filename
             with open(tmp_path, "wb") as buf:
@@ -627,37 +648,44 @@ async def upload_batch(request: Request, files: list[UploadFile] = File(...)):
             md5 = get_md5(tmp_path)
             duplicate_found = False
 
-            for b in existing_buckets:
-                resp = s3.list_objects_v2(Bucket=b)
-                for obj in resp.get("Contents", []):
-                    if obj["Key"].lower().endswith(".pdf"):
-                        if s3_object_md5(b, obj["Key"]) == md5:
-                            skipped.append(file.filename)
-                            duplicate_found = True
-                            break
-                if duplicate_found:
-                    break
+            # 🔍 check for duplicates across all buckets
+            for b in buckets:
+                try:
+                    resp = s3.list_objects_v2(Bucket=b, Prefix="kb-data/")
+                    for obj in resp.get("Contents", []):
+                        if obj["Key"].lower().endswith(".pdf"):
+                            if s3_object_md5(b, obj["Key"]) == md5:
+                                print(f"[⏭] Duplicate found: {file.filename}")
+                                skipped.append(file.filename)
+                                duplicate_found = True
+                                break
+                    if duplicate_found:
+                        break
+                except Exception as e:
+                    print(f"[!] Error checking duplicates in {b}: {e}")
 
             if duplicate_found:
                 continue
 
-            # 3️⃣ Chunk and upload
+            # 🧩 Chunk and upload
             extract_with_docling(tmp_path, OUTPUT_DIR)
-            bucket = get_available_bucket()
-            sync_to_s3(OUTPUT_DIR / tmp_path.stem, bucket_name=bucket)
-            uploaded.append({"file": file.filename, "bucket": bucket})
+            target_bucket = get_available_bucket()
+
+            # Upload under kb-data/<paper_name>/
+            target_prefix = f"kb-data/{tmp_path.stem}"
+            sync_to_s3(OUTPUT_DIR / tmp_path.stem, bucket_name=target_bucket, prefix=target_prefix)
+            uploaded.append({"file": file.filename, "bucket": target_bucket})
 
         return {
             "status": "ok",
             "uploaded": uploaded,
             "skipped": skipped,
-            "message": f"Uploaded {len(uploaded)}, skipped {len(skipped)} duplicates."
+            "message": f"Uploaded {len(uploaded)} new, skipped {len(skipped)} duplicates."
         }
 
     except Exception as e:
         import traceback; traceback.print_exc()
         return {"status": "error", "message": str(e)}
-
 
 
 # -----------------------
