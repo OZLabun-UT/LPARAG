@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, UploadFile, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from dotenv import load_dotenv
 import os
@@ -51,10 +52,19 @@ session_state = {}
 #Favicon 
 BASE_DIR = Path(__file__).parent
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # or list your actual frontend origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Serve the favicon directly
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return FileResponse(BASE_DIR / "favicon.ico")
+
 
 # -----------------------
 # Utility Functions
