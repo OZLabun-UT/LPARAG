@@ -38,7 +38,45 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 CHAT_PASSWORD = os.getenv("CHAT_PASSWORD")
 KB_ID = os.getenv("KB_ID")
 REGION = os.getenv("AWS_REGION", "us-east-2")
-MODEL_ARN = os.getenv("MODEL_ARN")
+# -----------------------
+# Model Registry
+# -----------------------
+
+MODEL_ARNS = {
+    "Claude Sonnet 4": os.getenv("CLAUDE_SONNET_4_ARN"),
+    "Claude Sonnet 4.5": os.getenv("CLAUDE_SONNET_4_5_ARN"),
+    "Claude Haiku 4.5": os.getenv("CLAUDE_HAIKU_4_5_ARN"),
+    "Claude Opus 4": os.getenv("CLAUDE_OPUS_4_ARN"),
+    "Claude Opus 4.1": os.getenv("CLAUDE_OPUS_4_1_ARN"),
+    "Claude 3.7 Sonnet": os.getenv("CLAUDE_SONNET_3_7_ARN"),
+    "Claude 3.5 Sonnet v2": os.getenv("CLAUDE_SONNET_3_5_V2_ARN"),
+    "Claude 3.5 Haiku": os.getenv("CLAUDE_HAIKU_3_5_ARN"),
+    "Claude 3 Haiku": os.getenv("CLAUDE_HAIKU_3_ARN"),
+
+    "Nova Premier": os.getenv("NOVA_PREMIER_ARN"),
+    "Nova Pro": os.getenv("NOVA_PRO_ARN"),
+    "Nova Lite": os.getenv("NOVA_LITE_ARN"),
+    "Nova Micro": os.getenv("NOVA_MICRO_ARN"),
+
+    "Llama 3.1 8B": os.getenv("LLAMA_3_1_8B_ARN"),
+    "Llama 3.1 70B": os.getenv("LLAMA_3_1_70B_ARN"),
+    "Llama 3.1 405B": os.getenv("LLAMA_3_1_405B_ARN"),
+    "Llama 3.2 1B": os.getenv("LLAMA_3_2_1B_ARN"),
+    "Llama 3.2 3B": os.getenv("LLAMA_3_2_3B_ARN"),
+    "Llama 3.2 11B": os.getenv("LLAMA_3_2_11B_ARN"),
+    "Llama 3.2 90B": os.getenv("LLAMA_3_2_90B_ARN"),
+    "Llama 3.3 70B": os.getenv("LLAMA_3_3_70B_ARN"),
+    "Llama 4 Scout 17B": os.getenv("LLAMA_4_SCOUT_17B_ARN"),
+    "Llama 4 Maverick 17B": os.getenv("LLAMA_4_MAVERICK_17B_ARN"),
+
+    "DeepSeek R1": os.getenv("DEEPSEEK_R1_ARN"),
+}
+
+def get_model_arn(model_name: str) -> str:
+    arn = MODEL_ARNS.get(model_name)
+    if not arn:
+        raise ValueError(f"Unknown model: {model_name}")
+    return arn
 
 debug=False
 
@@ -254,7 +292,9 @@ async def query_kb(query: dict, request: Request):
         # 2️⃣ Run Bedrock retrieval
         response = run_retrieval(question)
         retrievals = response.get("retrievalResults", [])
-        generated_answer = run_generation(question, retrievals)
+        model_name = query.get("model_name", "Claude Sonnet 4")
+        model_arn = get_model_arn(model_name)
+        generated_answer = run_generation(question, retrievals, model_arn)
 
 
         # 3️⃣ Process each retrieved paper
@@ -524,15 +564,15 @@ def format_answer(pdf_links):
     return "Top retrieved references:\n" + "\n".join(lines)
 
 
-def run_generation(question: str, retrieved_chunks: list) -> str:
-    """Retrieve and generate in one call; return answer text and retrieved refs."""
+def run_generation(question: str, retrieved_chunks: list, model_arn: str) -> str:
+    """Retrieve and generate using specified model."""
     response = bedrock_agent.retrieve_and_generate(
         input={"text": question},
         retrieveAndGenerateConfiguration={
             "type": "KNOWLEDGE_BASE",
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": KB_ID,
-                "modelArn": MODEL_ARN,
+                "modelArn": model_arn,
             },
         },
     )

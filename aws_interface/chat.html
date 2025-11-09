@@ -233,10 +233,37 @@
       </div>      
       <div id="chat"></div>
       <div class="input-row">
+        <select id="modelSelect" class="model-select">
+          <option>Claude Sonnet 4</option>
+          <option>Claude Sonnet 4.5</option>
+          <option>Claude Haiku 4.5</option>
+          <option>Claude Opus 4</option>
+          <option>Claude Opus 4.1</option>
+          <option>Claude 3.7 Sonnet</option>
+          <option>Claude 3.5 Sonnet v2</option>
+          <option>Claude 3.5 Haiku</option>
+          <option>Claude 3 Haiku</option>
+          <option>Nova Premier</option>
+          <option>Nova Pro</option>
+          <option>Nova Lite</option>
+          <option>Nova Micro</option>
+          <option>Llama 3.1 8B</option>
+          <option>Llama 3.1 70B</option>
+          <option>Llama 3.1 405B</option>
+          <option>Llama 3.2 1B</option>
+          <option>Llama 3.2 3B</option>
+          <option>Llama 3.2 11B</option>
+          <option>Llama 3.2 90B</option>
+          <option>Llama 3.3 70B</option>
+          <option>Llama 4 Scout 17B</option>
+          <option>Llama 4 Maverick 17B</option>
+          <option>DeepSeek R1</option>
+        </select>
         <input type="text" id="question" placeholder="Ask your question..." />
         <input type="number" id="imgLimit" min="1" max="20" value="8" />
         <button onclick="sendMessage()">Send</button>
       </div>
+      
 
       <div class="upload-toolbar">
         <label for="permFileInput" class="upload-btn">📁 Permanent Upload</label>
@@ -389,16 +416,20 @@
       const loading = document.getElementById("loading");
       loading.style.display = "flex";
 
+      const modelName = document.getElementById("modelSelect").value;
+
+
       try {
         const res = await fetch("/query", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
-            question: q,
-            image_limit: imgLimit,
-            session_id: sessionId,
-            selected_images: selectedImages
-          })
+          question: q,
+          image_limit: imgLimit,
+          session_id: sessionId,
+          selected_images: selectedImages,
+          model_name: modelName
+        })
         });
 
         const data = await res.json();

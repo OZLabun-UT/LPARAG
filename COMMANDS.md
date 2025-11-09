@@ -96,27 +96,26 @@ git remote -v
     Figure out how to make it so ppl can make accounts and stuff
     Can we figure out how to see relevant appendices when there's not much nat lang there?
 
-    * Stop multiple of same paper from being in database
     * Get name that we want to use as domain name
     * Keep a version with smaller controlled knowledge base
     * Make tabulated data out of images im2graph
-    * Make it show returned relevance scores
     * Fix metadata being wrapped in caption
     * Add help features and tutorials
     * Relevance threshold
     * Switch models
     * Mark junk
-    * Failed uploads 
-
-
 
 
     Done:
     * Save conversations to the side for people to flip back and forth
     * Convos saved in local memory
+    * Stop multiple of same paper from being in database
     * Fix button UI
     * Fix ui hide button
     * Returned images should be indexed and kept in the llm memory (maybe make them selectable)
+    * Failed uploads 
+    * Make it show returned relevance scores
+
 
 
 
