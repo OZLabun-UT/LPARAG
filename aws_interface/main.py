@@ -113,6 +113,20 @@ def parse_s3_uri(uri: str):
         return None, None
     return match.group(1), match.group(2)
 
+@app.post("/delete_s3_object")
+async def delete_s3_object(request: Request):
+    data = await request.json()
+    url = data.get("url")
+    if not url:
+        return {"error": "Missing URL"}
+
+    try:
+        subprocess.run(["python3", "pdf_chunker/s3_delete.py", url], check=True)
+        return {"message": f"Deleted {url} successfully."}
+    except subprocess.CalledProcessError as e:
+        return {"error": f"Deletion failed: {e}"}
+
+
 def make_presigned(bucket: str, key: str):
     presigned_url = s3.generate_presigned_url(
         "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
@@ -122,6 +136,7 @@ def make_presigned(bucket: str, key: str):
         mime_type = "application/octet-stream"
     name = os.path.splitext(os.path.basename(key))[0]
     display_name = name.replace("_", " ").replace("-", " ").title().strip()
+    print(presigned_url)
     return {
         "source": f"s3://{bucket}/{key}",
         "url": presigned_url,
