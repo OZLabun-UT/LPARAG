@@ -84,6 +84,25 @@ git remote -v
 
 "Explain LWFA to me."
 
+# Working Models
+
+Claude Opus 4 (slow)
+Claude Sonnet 4
+Claude 3.5 Sonnet v2
+Nova Pro
+Nova Premier
+Nova Lite
+Nova Micro
+Llama 4 Scout 17B
+Llama 3.2 90B
+DeepSeek R1
+
+
+
+# Bad Models
+
+Claude Opus 4.1
+
 
 # To-dos
 
@@ -102,9 +121,17 @@ git remote -v
     * Fix metadata being wrapped in caption
     * Add help features and tutorials
     * Relevance threshold
+    * Wikipedia scraper and openstax?
+    * APS Physiscs Magazine
+    * Arxiv scraper
     * Switch models
     * Mark junk
-
+    * Exclude top relevance for new info?
+    * Make a comprehensive system prompt
+    * Add back button to pdf upload
+    * "Use your general knowledge"
+    * Save all logs
+    * Most relevant 20 papers not just 2
 
     Done:
     * Save conversations to the side for people to flip back and forth
@@ -116,11 +143,6 @@ git remote -v
     * Failed uploads 
     * Make it show returned relevance scores
 
-
-
-
-
-    
 [Unit]
 Description=Tau FastAPI Service
 After=network.target

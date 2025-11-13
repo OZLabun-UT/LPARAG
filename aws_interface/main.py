@@ -298,7 +298,11 @@ async def query_kb(query: dict, request: Request):
     try:
         session_id = query.get("session_id") or str(uuid4())
         state = session_state.setdefault(session_id, {"history": [], "citations": [], "temp_pdfs": []})
-        question = query["question"]
+
+        # Janky solution
+        question = "You are a topical expert language model that is a domain expert in the field that you have references to. All of your answers must be sent in hierarchical structures and bullet points to make them easily digestible. It is important that you separate all of your different answers and points with newlines. Now answer the following question: " + query["question"]
+
+        #question = query["question"]
         image_limit = int(query.get("image_limit", 8))
 
         # 1️⃣ Build prompt context

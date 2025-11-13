@@ -5,6 +5,8 @@
   <title>Knowledge Base Chat</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="/favicon.ico" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <style>
     :root {
       --bg:#f5f7fa; --card-bg:#ffffffcc; --accent-bg:#eef2ff;
@@ -270,6 +272,34 @@
     margin-bottom: 0.6rem;
   }
 
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+    margin-top: 1rem;
+    font-weight: 600;
+  }
+
+  .markdown-body pre {
+    background: #1e2531;
+    color: #f3f4f6;
+    padding: 0.75rem;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+
+  .markdown-body code {
+    background: rgba(0,0,0,0.15);
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+
+  .markdown-body ul {
+    padding-left: 1.2rem;
+  }
+
+  .markdown-body p {
+    margin: 0.4rem 0;
+  }
+
+
   .loader {
     width: 18px;
     height: 18px;
@@ -510,7 +540,16 @@
         const data = await res.json();
         if (!sessionId && data.session_id) sessionId = data.session_id;
 
-        let msgHtml = `<div class='assistant-msg'><strong>Assistant:</strong> ${data.answer || "(no response)"}`;
+        const rendered = marked.parse(data.answer || "(no response)");
+
+        msgHtml = `
+          <div class='assistant-msg'>
+            <strong>Assistant:</strong>
+            <div class="markdown-body">${rendered}</div>
+          </div>
+        `;
+        MathJax.typesetPromise();
+
 
         // ---- FIGURES ----
         if (!lastMessageUsedImages) {
