@@ -675,8 +675,13 @@ async def upload_batch(request: Request, files: list[UploadFile] = File(...)):
         # --- 1️⃣ List all existing tau-papers-N buckets ---
         buckets = [
             b["Name"] for b in s3.list_buckets()["Buckets"]
-            if b["Name"].startswith(base_name)
+            if b["Name"].startswith(os.getenv("PDF_BUCKET_BASE", "tau-papers"))
         ]
+        print("[🪣] Found candidate buckets:")
+        for b in buckets:
+            print(f"   - {b}")
+
+
         buckets.sort(key=lambda b: int(b.replace(base_name + "-", "")))
 
         # --- 2️⃣ Helper: count subfolders in kb-data/ ---

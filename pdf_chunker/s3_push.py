@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 import time
 import hashlib
+import re
 
 load_dotenv(override=True)
 
@@ -89,57 +90,65 @@ def sync_to_s3(local_folder, bucket_name, prefix="kb-data"):
 
     print(f"[•] Uploading {local_folder} → s3://{bucket_name}/{s3_prefix} ...")
     subprocess.run([
-        "aws", "s3", "sync", str(local_folder),
-        f"s3://{bucket_name}/{s3_prefix}/",
-        "--delete"
+    "aws", "s3", "sync", str(local_folder),
+    f"s3://{bucket_name}/{s3_prefix}/",
+    "--exact-timestamps"
     ], check=True)
+
     print(f"[✓] Synced {local_folder} → s3://{bucket_name}/{s3_prefix}")
 
     # --- Cleanup local folder ---
     try:
-        for child in local_path.iterdir():
-            if child.is_file():
-                child.unlink()
-            elif child.is_dir():
-                shutil.rmtree(child)
-        print(f"[🗑] Cleaned up local files in {local_folder}")
+        shutil.rmtree(local_path)
+        print(f"[🗑] Deleted local folder after successful upload: {local_folder}")
     except Exception as e:
         print(f"[!] Cleanup failed: {e}")
 
 
-def resync_knowledge_base(kb_id: str, region: str = AWS_REGION):
-    """Triggers a Bedrock Knowledge Base ingestion sync using KB_ID and DATA_SOURCE_ID."""
-    client = boto3.client("bedrock-agent", region_name=region)
-    data_source_id = os.getenv("DATA_SOURCE_ID")
-    if not data_source_id:
-        print("[!] Missing DATA_SOURCE_ID in environment (.env)")
-        sys.exit(2)
 
-    print(f"[•] Starting knowledge base sync for {kb_id} (data source {data_source_id}) ...")
-    try:
+def resync_knowledge_base(kb_id: str, region: str = AWS_REGION):
+    """Auto-detect new tau-papers-* buckets and ensure each is a data source."""
+    client = boto3.client("bedrock-agent", region_name=region)
+    s3 = boto3.client("s3", region_name=region)
+    base_name = os.getenv("PDF_BUCKET_BASE", "tau-papers")
+
+    # List all relevant S3 buckets
+    all_buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
+    paper_buckets = [b for b in all_buckets if b.startswith(base_name)]
+    print(f"[🪣] Found paper buckets: {paper_buckets}")
+
+    # Get existing data sources for the KB
+    existing_ds = client.list_data_sources(knowledgeBaseId=kb_id)["dataSourceSummaries"]
+    existing_names = {d["name"] for d in existing_ds}
+    print(f"[📚] Existing data sources: {existing_names}")
+
+    # Create data sources for any missing buckets
+    for bucket in paper_buckets:
+        if bucket not in existing_names:
+            print(f"[➕] Creating new data source for bucket: {bucket}")
+            client.create_data_source(
+                knowledgeBaseId=kb_id,
+                name=bucket,
+                dataSourceConfiguration={
+                    "type": "S3",
+                    "s3Configuration": {
+                        "bucketArn": f"arn:aws:s3:::{bucket}"
+                    }
+                },
+                description="Auto-added bucket",
+            )
+
+
+    # Trigger ingestion for all data sources
+    for ds in client.list_data_sources(knowledgeBaseId=kb_id)["dataSourceSummaries"]:
+        ds_id = ds["dataSourceId"]
+        print(f"[⚙️] Starting ingestion for {ds['name']} ...")
         resp = client.start_ingestion_job(
             knowledgeBaseId=kb_id,
-            dataSourceId=data_source_id
+            dataSourceId=ds_id
         )
         job_id = resp["ingestionJob"]["ingestionJobId"]
-        print(f"[→] Ingestion job started: {job_id}")
-
-        # Poll for completion
-        while True:
-            job = client.get_ingestion_job(
-                knowledgeBaseId=kb_id,
-                dataSourceId=data_source_id,
-                ingestionJobId=job_id
-            )
-            status = job["ingestionJob"]["status"]
-            if status in ("COMPLETED", "COMPLETE", "FAILED"):
-                print(f"[✓] Ingestion job finished with status: {status}")
-                break
-            print(f"   ⏳ In progress... ({status})")
-            time.sleep(5)
-    except Exception as e:
-        print(f"[!] Failed to trigger knowledge base sync: {e}")
-        sys.exit(2)
+        print(f"   ↳ job_id = {job_id}")
 
 
 if __name__ == "__main__":

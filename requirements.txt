@@ -6,3 +6,4 @@ python-multipart
 opencv-python
 unstructured[all-docs]
 tqdm
+arxivscraper

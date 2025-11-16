@@ -105,12 +105,7 @@ Claude Opus 4.1
 
 
 # To-dos
-
-    Pressing: Get EC2 permissions
-    Add captions to images and some intro context
-
-    Benchmark w confusing context
-    Benchmark long term memory
+https://github.com/Mahdisadjadi/arxivscraper
 
     Figure out how to make it so ppl can make accounts and stuff
     Can we figure out how to see relevant appendices when there's not much nat lang there?
@@ -132,6 +127,8 @@ Claude Opus 4.1
     * "Use your general knowledge"
     * Save all logs
     * Most relevant 20 papers not just 2
+    * Fix knowledge base resync to reload data sources
+    * Fix paper upload to register new buckets as data sources
 
     Done:
     * Save conversations to the side for people to flip back and forth
