@@ -1,0 +1,106 @@
+{
+  "ResponseMetadata": {
+    "RequestId": "72aad2c7-ba33-4b8c-88d4-40da76e462c4",
+    "HTTPStatusCode": 200,
+    "HTTPHeaders": {
+      "date": "Mon, 17 Nov 2025 20:11:59 GMT",
+      "content-type": "application/json",
+      "content-length": "6750",
+      "connection": "keep-alive",
+      "x-amzn-requestid": "72aad2c7-ba33-4b8c-88d4-40da76e462c4"
+    },
+    "RetryAttempts": 0
+  },
+  "retrievalResults": [
+    {
+      "content": {
+        "text": "However, despite their low flux (approximately 1 cm -2 min -1 ) and high average energy, certain limitations on research exist.\"     },     {       \"self_ref\": \"#/texts/63\",       \"parent\": {         \"$ref\": \"#/body\"       },       \"children\": [],       \"content_layer\": \"body\",       \"label\": \"text\",       \"prov\": [         {           \"page_no\": 2,           \"bbox\": {             \"l\": 39.685,             \"t\": 160.80696679687503,             \"r\": 296.344,             \"b\": 67.14996679687499,             \"coord_origin\": \"BOTTOMLEFT\"           },           \"charspan\": [             0,             607           ]         }       ],       \"orig\": \"The energy scale of ultrashort, high-intensity laser acceleration technology now exceeds the threshold required for muon generation, making it feasible to produce muons using GeV-level electrons from laser wakefield acceleration (LWFA) 6 . In 2009, Titov et al. 33 proposed using LWFA electron beams to generate \\u03bc + \\u03bc -pairs by means of the Bethe-Heitler process. Further studies have optimized conditions for muon pair production 34 .",
+        "type": "TEXT"
+      },
+      "location": {
+        "s3Location": {
+          "uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//structured.json"
+        },
+        "type": "S3"
+      },
+      "metadata": {
+        "x-amz-bedrock-kb-source-uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//structured.json",
+        "x-amz-bedrock-kb-chunk-id": "9fa74bbc-bf7e-48fb-af8c-9bb97cebdcb1",
+        "x-amz-bedrock-kb-data-source-id": "OKT5BHJOEL"
+      },
+      "score": 0.4411401879558526
+    },
+    {
+      "content": {
+        "text": "Notably, muons can also be produced through photo-production or electro-production, which have higher cross-sections compared with the Bethe-Heitler process for muons 35 .\",       \"text\": \"The energy scale of ultrashort, high-intensity laser acceleration technology now exceeds the threshold required for muon generation, making it feasible to produce muons using GeV-level electrons from laser wakefield acceleration (LWFA) 6 . In 2009, Titov et al. 33 proposed using LWFA electron beams to generate \\u03bc + \\u03bc -pairs by means of the Bethe-Heitler process. Further studies have optimized conditions for muon pair production 34 . Notably, muons can also be produced through photo-production or electro-production, which have higher cross-sections compared with the Bethe-Heitler process for muons 35 .\"     },     {       \"self_ref\": \"#/texts/64\",       \"parent\": {         \"$ref\": \"#/body\"       },       \"children\": [],       \"content_layer\": \"body\",       \"label\": \"text\",       \"prov\": [         {           \"page_no\": 2,           \"bbox\": {             \"l\": 39.685,             \"t\": 64.05696679687503,             \"r\": 296.233,             \"b\":",
+        "type": "TEXT"
+      },
+      "location": {
+        "s3Location": {
+          "uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//structured.json"
+        },
+        "type": "S3"
+      },
+      "metadata": {
+        "x-amz-bedrock-kb-source-uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//structured.json",
+        "x-amz-bedrock-kb-chunk-id": "86ebac6a-f5e0-4a76-8e09-7c4c79b9ad95",
+        "x-amz-bedrock-kb-data-source-id": "OKT5BHJOEL"
+      },
+      "score": 0.4407932926506619
+    },
+    {
+      "content": {
+        "text": "Jeon, H. T. Kim, and C. H. Nam, Bright muon source driven by GeV electron beams from a compact laser wakefield accelerator, Plasma Physics and Controlled Fusion 60 , 095002 (2018), publisher: IOP Publishing. - [17] L. Calvin, P. Tomassini, D. Doria, D. Martello, R. M. Deas, and G. Sarri, Laser-driven muon production for material inspection and imaging, Frontiers in Physics 11 , 10.3389/fphy.2023.1177486 (2023), publisher: Frontiers.",
+        "type": "TEXT"
+      },
+      "location": {
+        "s3Location": {
+          "uri": "s3://tau-papers-1/kb-data/2411.02321v1/2411.02321v1//chunks/text/chunk_036.txt"
+        },
+        "type": "S3"
+      },
+      "metadata": {
+        "x-amz-bedrock-kb-source-uri": "s3://tau-papers-1/kb-data/2411.02321v1/2411.02321v1//chunks/text/chunk_036.txt",
+        "x-amz-bedrock-kb-chunk-id": "0a46dc82-4dba-48cd-abd4-686af5520a69",
+        "x-amz-bedrock-kb-data-source-id": "OKT5BHJOEL"
+      },
+      "score": 0.43521754656679595
+    },
+    {
+      "content": {
+        "text": "Nucl. Eng. Technol. 53 , 2909-2917 (2021). 31. Gatto, C. et al. Letter of intent: muonium R&D/physics program at the MTA. Preprint at https://arxiv.org/abs/2212.04897 32.  Nagamine, K. Introductory Muon Science (Cambridge Univ. Press, 2003). 33.  Titov, A. I., Kampfer, B. & Takabe, H. Dimuon production by laser-wakefield accelerated electrons. Phys. Rev. Sp. Top. Acc. Beams 12 , 111301 (2009). 34.  Rao, B. S. et al. Bright muon source driven by GeV electron beams from a compact laser wakefield accelerator. Plasma Phys. Control. Fusion 60 , 095002 (2018). 35.  Nagamine, K. et al. Compact muon source with electron accelerator for a mobile μSR facility. Phys. B 404 , 1020-1023 (2009). 36.  Schumaker, W. et al. Making pions with laser light. N. J. Phys. 20 , 073008 (2018).",
+        "type": "TEXT"
+      },
+      "location": {
+        "s3Location": {
+          "uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//chunks/text/chunk_022.txt"
+        },
+        "type": "S3"
+      },
+      "metadata": {
+        "x-amz-bedrock-kb-source-uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//chunks/text/chunk_022.txt",
+        "x-amz-bedrock-kb-chunk-id": "bb6748e5-6425-414b-bf75-73492dd73066",
+        "x-amz-bedrock-kb-data-source-id": "OKT5BHJOEL"
+      },
+      "score": 0.43369237370943475
+    },
+    {
+      "content": {
+        "text": "Sp. Top. Acc. Beams 12 , 111301 (2009).\",       \"enumerated\": true,       \"marker\": \"33.\"     },     {       \"self_ref\": \"#/texts/749\",       \"parent\": {         \"$ref\": \"#/groups/3\"       },       \"children\": [],       \"content_layer\": \"body\",       \"label\": \"list_item\",       \"prov\": [         {           \"page_no\": 7,           \"bbox\": {             \"l\": 306.149,             \"t\": 515.173966796875,             \"r\": 562.619,             \"b\": 486.654966796875,             \"coord_origin\": \"BOTTOMLEFT\"           },           \"charspan\": [             0,             163           ]         }       ],       \"orig\": \"34.  Rao, B. S. et al. Bright muon source driven by GeV electron beams from a compact laser wakefield accelerator. Plasma Phys. Control. Fusion 60 , 095002 (2018).\",       \"text\": \" Rao, B. S. et al. Bright muon source driven by GeV electron beams from a compact laser wakefield accelerator. Plasma Phys. Control.",
+        "type": "TEXT"
+      },
+      "location": {
+        "s3Location": {
+          "uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//structured.json"
+        },
+        "type": "S3"
+      },
+      "metadata": {
+        "x-amz-bedrock-kb-source-uri": "s3://tau-papers-1/kb-data/s41567-025-02872-2/s41567-025-02872-2//structured.json",
+        "x-amz-bedrock-kb-chunk-id": "74367d28-6efc-4325-9dd7-6a54c2df8fc8",
+        "x-amz-bedrock-kb-data-source-id": "OKT5BHJOEL"
+      },
+      "score": 0.4314210802220989
+    }
+  ]
+}

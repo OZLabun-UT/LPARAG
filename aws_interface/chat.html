@@ -385,6 +385,7 @@
         <label for="tempFileInput" class="upload-btn">📄 Temporary Upload</label>
         <input id="tempFileInput" type="file" accept="application/pdf" onchange="uploadFile('temp')" hidden />
         <button class="upload-btn" onclick="openBatchUpload()">📦 Batch Upload Page</button>
+        <button class="scraper-arxiv-btn" onclick="openArxivScraper()">📚 arXiv Scraper</button>
       </div>
       
 
@@ -667,6 +668,9 @@
 
     function openBatchUpload() {
     window.location.href = "/batch_upload";
+    }
+    function openArxivScraper() {
+    window.location.href = "/arxiv";
     }
 
     async function handleImageDelete(imageUrl, btnElement) {

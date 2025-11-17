@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>arXiv Downloader</title>
+  <style>
+    body { background: #0d1117; color: #f3f4f6; font-family: Inter, sans-serif; padding: 2rem; }
+    h1 { color: #8b5cf6; }
+    input {
+      margin: 0.5rem 0;
+      padding: 0.6rem;
+      border-radius: 6px;
+      border: none;
+      width: 300px;
+    }
+    button {
+      background: linear-gradient(135deg, #7c3aed, #2563eb);
+      border: none; color: white;
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 1rem;
+    }
+    button:hover { opacity: 0.9; }
+    .result {
+      background: #1e2531;
+      margin: 1rem 0;
+      padding: 1rem;
+      border-radius: 10px;
+    }
+    a { color: #60a5fa; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>📄 arXiv Paper Downloader</h1>
+  <p>Search and automatically download papers to your local directory.</p>
+
+  <form id="fetchForm">
+    <label>Search Query:</label><br/>
+    <input id="query" type="text" placeholder="e.g. laser wakefield acceleration" required /><br/>
+    <label>Category (optional):</label><br/>
+    <input id="category" type="text" placeholder="e.g. physics.plasm-ph" /><br/>
+    <label>Max Results:</label><br/>
+    <input id="limit" type="number" value="10" /><br/>
+    <button type="submit">⬇️ Download Papers</button>
+  </form>
+
+  <div id="results"></div>
+
+  <script>
+    document.getElementById("fetchForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const q = document.getElementById("query").value;
+      const cat = document.getElementById("category").value;
+      const limit = parseInt(document.getElementById("limit").value);
+
+      const resBox = document.getElementById("results");
+      resBox.innerHTML = "<p>⏳ Fetching and downloading papers...</p>";
+
+      const res = await fetch("/fetch_arxiv_papers", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({query: q, category: cat, limit})
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        resBox.innerHTML = `<p style="color:red;">Error: ${data.error}</p>`;
+        return;
+      }
+
+      let html = `<h2>Downloaded ${data.papers.length} Papers</h2>`;
+      for (const p of data.papers) {
+        html += `
+          <div class="result">
+            <h3>${p.title}</h3>
+            <p><strong>Authors:</strong> ${p.authors}</p>
+            <p><strong>Abstract:</strong> ${p.abstract}</p>
+            <p><a href="${p.pdf_url}" target="_blank">📄 View PDF</a></p>
+          </div>
+        `;
+      }
+      resBox.innerHTML = html;
+    });
+  </script>
+</body>
+</html>

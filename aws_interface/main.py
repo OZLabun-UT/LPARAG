@@ -9,6 +9,7 @@ import os
 import boto3
 import re
 import mimetypes
+from urllib.parse import quote_plus
 from pathlib import Path
 import shutil
 import uvicorn
@@ -78,7 +79,7 @@ def get_model_arn(model_name: str) -> str:
         raise ValueError(f"Unknown model: {model_name}")
     return arn
 
-debug=False
+debug=True
 
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
@@ -760,6 +761,136 @@ async def upload_batch(request: Request, files: list[UploadFile] = File(...)):
     except Exception as e:
         import traceback; traceback.print_exc()
         return {"status": "error", "message": str(e)}
+
+# ARXIV SCRAPER
+from arxivscraper import Scraper
+
+@app.get("/arxiv", response_class=HTMLResponse)
+def serve_arxiv_ui():
+    return open(Path(__file__).resolve().parent / "arxiv_scraper.html").read()
+
+
+@app.get("/arxiv", response_class=HTMLResponse)
+def serve_arxiv_ui():
+    return open(Path(__file__).resolve().parent / "arxiv_scraper.html").read()
+
+
+@app.post("/fetch_arxiv_papers")
+async def fetch_arxiv_papers(request: Request):
+    import requests, feedparser, re
+    from pathlib import Path
+
+    try:
+        params = await request.json()
+        query = params.get("query")
+        category = params.get("category") or ""
+        limit = int(params.get("limit", 10))
+
+        print(f"[🔎] Fetching arXiv papers for '{query}', category='{category}', limit={limit}")
+
+        # Build query for title + abstract
+        q = f"all:{query}"
+        if category:
+            q += f"+AND+cat:{category}"
+        encoded_q = quote_plus(q)
+        url = f"https://export.arxiv.org/api/query?search_query={encoded_q}&start=0&max_results={limit}"
+
+        feed = feedparser.parse(url)
+        download_dir = Path(__file__).resolve().parent.parent / "pdf_chunker" / "pdfs"
+        download_dir.mkdir(parents=True, exist_ok=True)
+
+        papers = []
+        for entry in feed.entries:
+            title = entry.title.strip().replace("\n", " ")
+            authors = ", ".join(a.name for a in entry.authors)
+            abstract = entry.summary.strip().replace("\n", " ")
+            arxiv_id = entry.id.split("/abs/")[-1]
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+            safe_name = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_") + ".pdf"
+            pdf_path = download_dir / safe_name
+
+            # Download PDF
+            try:
+                resp = requests.get(pdf_url, timeout=20)
+                if resp.status_code == 200:
+                    with open(pdf_path, "wb") as f:
+                        f.write(resp.content)
+                    print(f"[📄] Saved {pdf_path.name}")
+                else:
+                    print(f"[!] Failed to fetch {pdf_url}: {resp.status_code}")
+            except Exception as e:
+                print(f"[!] Error fetching {pdf_url}: {e}")
+
+            papers.append({
+                "title": title,
+                "authors": authors,
+                "abstract": abstract,
+                "pdf_url": pdf_url
+            })
+
+        return {"papers": papers, "download_dir": str(download_dir)}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"error": str(e)}
+
+
+
+@app.post("/download_arxiv_pdfs")
+async def download_arxiv_pdfs(request: Request):
+    import pandas as pd
+    import requests
+    from arxivscraper import Scraper
+
+    try:
+        params = await request.json()
+        query = params.get("query")
+        category = params.get("category") or ""
+        limit = int(params.get("limit", 10))
+
+        print(f"[🔎] Scraping arXiv for query='{query}', category='{category}', limit={limit}")
+
+        scraper = Scraper(category=category, filters={"title": query})
+        output = scraper.scrape()
+        if not output:
+            return {"error": "No papers found."}
+
+        # Convert to dataframe
+        cols = ("id", "title", "categories", "abstract")
+        df = pd.DataFrame(output, columns=cols)
+        results = df.head(limit)
+
+        # Set up download folder
+        download_dir = Path(__file__).resolve().parent.parent / "pdf_chunker" / "pdfs"
+        download_dir.mkdir(parents=True, exist_ok=True)
+
+        downloaded = 0
+        for _, row in results.iterrows():
+            arxiv_id = row["id"]
+            title = row["title"]
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+            safe_name = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")
+            pdf_path = download_dir / f"{safe_name}.pdf"
+
+            print(f"[⬇️] Downloading {pdf_url}")
+            try:
+                resp = requests.get(pdf_url, timeout=20)
+                if resp.status_code == 200:
+                    with open(pdf_path, "wb") as f:
+                        f.write(resp.content)
+                    downloaded += 1
+                    print(f"[📄] Saved {pdf_path.name}")
+                else:
+                    print(f"[!] Failed: HTTP {resp.status_code} for {arxiv_id}")
+            except Exception as e:
+                print(f"[!] Error downloading {arxiv_id}: {e}")
+
+        print(f"[✅] Downloaded {downloaded} PDFs to {download_dir}")
+        return {"downloaded": downloaded, "folder": str(download_dir)}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"error": str(e)}
 
 
 # -----------------------
