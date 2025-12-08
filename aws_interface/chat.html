@@ -299,6 +299,80 @@
     margin: 0.4rem 0;
   }
 
+  .pdf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .pdf-card {
+    background: var(--accent-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem;
+    text-align: center;
+    color: var(--text);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .pdf-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  .pdf-link {
+    display: block;
+    background: var(--accent);
+    color: white;
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.9rem;
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .pdf-score {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--subtext);
+    margin-top: 4px;
+  }
+
+    .preset-box {
+    position: relative;
+    background: var(--accent-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem 0.8rem;
+    width: 220px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .preset-header {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .preset-options {
+    display: none;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-top: 0.5rem;
+  }
+
+  .preset-box.open .preset-options {
+    display: flex;
+  }
+
+  .preset-option input {
+    accent-color: var(--accent);
+    margin-right: 6px;
+  }
+
+
+
 
   .loader {
     width: 18px;
@@ -369,7 +443,28 @@
           <option>Llama 4 Maverick 17B</option>
           <option>DeepSeek R1</option>
         </select>
+
+        <div class="preset-box">
+          <div class="preset-header">Prompt Presets ▼</div>
+          <div class="preset-options">
+            <label class="preset-option">
+              <input type="checkbox" id="preset-general" value="general">
+              General Knowledge
+            </label>
+            <label class="preset-option">
+              <input type="checkbox" id="preset-structured" value="topical">
+              Structured Answer
+            </label>
+          </div>
+        </div>
+        
+        
+        
+        
         <input type="text" id="question" placeholder="Ask your question..." />
+        <input type="number" id="resultLimit" min="1" max="50" value="10" title="# of results" />
+        <input type="number" id="scoreThreshold" min="0" max="100" value="20" title="Min relevance %" />
+
         <input type="number" id="imgLimit" min="1" max="20" value="8" />
         <button onclick="sendMessage()">Send</button>
       </div>
@@ -487,6 +582,11 @@
       }
       saveToLocal();
     }
+
+    document.querySelector(".preset-header").onclick = () => {
+    document.querySelector(".preset-box").classList.toggle("open");
+  };
+
   
     document.getElementById("newChatBtn").onclick=newConversation;
   
@@ -506,6 +606,8 @@
     // ---------- Messaging ----------
     async function sendMessage() {
       const q=document.getElementById("question").value.trim();
+      const resultLimit = parseInt(document.getElementById("resultLimit").value) || 10;
+      const scoreThreshold = parseInt(document.getElementById("scoreThreshold").value) / 100.0;
       const imgLimit=parseInt(document.getElementById("imgLimit").value)||8;
       if(!q) return;
   
@@ -529,17 +631,33 @@
 
       const modelName = document.getElementById("modelSelect").value;
 
+      let promptPrefix = "";
+
+      if (document.getElementById("preset-general").checked) {
+        promptPrefix += "Use your general knowledge to answer this question.\n\n";
+      }
+
+      if (document.getElementById("preset-structured").checked) {
+        promptPrefix +=
+          "You are a topical expert language model that is a domain expert in the field that you have references to. All of your answers must be sent in hierarchical structures and bullet points to make them easily digestible. It is important that you separate all of your different answers and points with newlines. Now answer the following question: \n\n";
+      }
+
+      const fullQuestion = promptPrefix + q;
+
+
 
       try {
         const res = await fetch("/query", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
-          question: q,
+          question: fullQuestion,
           image_limit: imgLimit,
           session_id: sessionId,
           selected_images: selectedImages,
-          model_name: modelName
+          model_name: modelName,
+          result_limit: resultLimit,
+          score_threshold: scoreThreshold
         })
         });
 
@@ -589,21 +707,26 @@
 
         // ---- PDF REFERENCES ----
         if (data.pdfs && data.pdfs.length > 0) {
-          msgHtml += "<div style='margin-top:0.6rem;'><h4>PDFs:</h4>";
+          msgHtml += `
+            <div style='margin-top:0.6rem;'>
+              <h4>PDFs:</h4>
+              <div class="pdf-grid">
+          `;
           for (const pdf of data.pdfs) {
             const name = pdf.display_name || "View PDF";
             const score = pdf.relevance !== undefined && pdf.relevance !== null
-              ? ` <span style="color:var(--subtext);font-size:0.85rem;">(score: ${pdf.relevance.toFixed(3)})</span>`
+              ? ` <span class="pdf-score">(score: ${pdf.relevance.toFixed(3)})</span>`
               : "";
-            msgHtml += `<div style='margin:0.3rem 0;'>
-              <a href='${pdf.url}' target='_blank'
-                style='display:inline-block;padding:0.4rem 0.7rem;
-                background:var(--accent);color:white;border-radius:6px;
-                font-size:0.9rem;text-decoration:none;'>📄 ${name}</a>${score}
-              </div>`;
+            msgHtml += `
+              <div class="pdf-card">
+                <a href='${pdf.url}' target='_blank' class="pdf-link">📄 ${name}</a>
+                ${score}
+              </div>
+            `;
           }
-          msgHtml += "</div>";
+          msgHtml += "</div></div>";
         }
+
 
         // ---- END MESSAGE ----
         msgHtml += "</div>";

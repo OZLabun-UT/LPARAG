@@ -79,7 +79,7 @@ def get_model_arn(model_name: str) -> str:
         raise ValueError(f"Unknown model: {model_name}")
     return arn
 
-debug=True
+debug=False
 
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
@@ -299,9 +299,13 @@ async def query_kb(query: dict, request: Request):
     try:
         session_id = query.get("session_id") or str(uuid4())
         state = session_state.setdefault(session_id, {"history": [], "citations": [], "temp_pdfs": []})
+        result_limit = int(query.get("result_limit", 10))
+        score_threshold = float(query.get("score_threshold", 0.7))
+
 
         # Janky solution
-        question = "You are a topical expert language model that is a domain expert in the field that you have references to. All of your answers must be sent in hierarchical structures and bullet points to make them easily digestible. It is important that you separate all of your different answers and points with newlines. Now answer the following question: " + query["question"]
+        #question = "You are a topical expert language model that is a domain expert in the field that you have references to. All of your answers must be sent in hierarchical structures and bullet points to make them easily digestible. It is important that you separate all of your different answers and points with newlines. Now answer the following question: " + query["question"]
+        question = query["question"]
 
         #question = query["question"]
         image_limit = int(query.get("image_limit", 8))
@@ -310,11 +314,11 @@ async def query_kb(query: dict, request: Request):
         combined_prompt = build_context(state, question, query)
 
         # 2️⃣ Run Bedrock retrieval
-        response = run_retrieval(question)
+        response = run_retrieval(combined_prompt, result_limit, score_threshold)
         retrievals = response.get("retrievalResults", [])
         model_name = query.get("model_name", "Claude Sonnet 4")
         model_arn = get_model_arn(model_name)
-        generated_answer = run_generation(question, retrievals, model_arn)
+        generated_answer = run_generation(combined_prompt, retrievals, model_arn, result_limit, score_threshold)
 
 
         # 3️⃣ Process each retrieved paper
@@ -386,18 +390,42 @@ def build_context(state, question, query):
         f"\n\nSelected Figures for Reference:{image_context}\n\nUser: {question}"
     )
 
-def run_retrieval(question):
-    """Call Bedrock retrieve() API and dump full JSON to disk."""
+def run_retrieval(question, num_results=10, threshold=0.7):
+    """
+    Retrieve chunks from the knowledge base for the given query.
+    Applies client-side score filtering instead of invalid Bedrock filters.
+    """
     response = bedrock_agent.retrieve(
         knowledgeBaseId=KB_ID,
         retrievalQuery={"text": question},
+        retrievalConfiguration={
+            "vectorSearchConfiguration": {
+                "numberOfResults": num_results
+            }
+        },
     )
+
+    # Save debug output if needed
     if debug:
         debug_path = Path(f"bedrock_debug_{datetime.now():%Y%m%d_%H%M%S}.json")
         with open(debug_path, "w", encoding="utf-8") as f:
             json.dump(response, f, indent=2, ensure_ascii=False)
         print(f"[🧠 Saved full Bedrock response to: {debug_path.resolve()}]")
+
+    # Filter results by score locally
+    results = response.get("retrievalResults", [])
+    filtered = [r for r in results if r.get("score", 0.0) >= threshold]
+
+    for i, r in enumerate(filtered):
+        src = r.get("metadata", {}).get("sourceId") or r.get("metadata", {}).get("documentId")
+        print(f"[{i}] {src} (score={r.get('score', 0.0):.3f})")
+
+
+    print(f"[ℹ️ Retrieved {len(results)} results, kept {len(filtered)} after threshold ≥ {threshold}]")
+    response["retrievalResults"] = filtered
     return response
+
+
 
 
 def process_paper(bucket, base_dir, score, remaining_slots):
@@ -574,18 +602,25 @@ def find_pdf_for_paper(bucket, base_dir, score):
 
 
 def format_answer(pdf_links):
-    """Format textual summary of retrieved PDFs and scores."""
+    """Format textual summary of ALL retrieved PDFs above threshold."""
     if not pdf_links:
         return "No documents retrieved."
+
     lines = [
         f"{i+1}. {pdf['display_name']} (score: {pdf.get('relevance',0):.3f})"
-        for i, pdf in enumerate(pdf_links[:5])
+        for i, pdf in enumerate(pdf_links)
     ]
-    return "Top retrieved references:\n" + "\n".join(lines)
+
+    return "Retrieved references (meeting threshold):\n" + "\n".join(lines)
 
 
-def run_generation(question: str, retrieved_chunks: list, model_arn: str) -> str:
-    """Retrieve and generate using specified model."""
+
+def run_generation(question: str, retrieved_chunks: list, model_arn: str,
+                   result_limit: int = 10, score_threshold: float = 0.7) -> str:
+    """
+    Generate a response using Bedrock's retrieve_and_generate API with 
+    optional client-side control over number of results and score threshold.
+    """
     response = bedrock_agent.retrieve_and_generate(
         input={"text": question},
         retrieveAndGenerateConfiguration={
@@ -593,23 +628,37 @@ def run_generation(question: str, retrieved_chunks: list, model_arn: str) -> str
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": KB_ID,
                 "modelArn": model_arn,
+                "retrievalConfiguration": {
+                    "vectorSearchConfiguration": {
+                        "numberOfResults": result_limit
+                    }
+                },
             },
         },
     )
 
-    # save debug dump if needed
-    if(debug):
+    # Save debug info
+    if debug:
         debug_path = Path(f"bedrock_debug_{datetime.now():%Y%m%d_%H%M%S}.json")
         with open(debug_path, "w", encoding="utf-8") as f:
             json.dump(response, f, indent=2, ensure_ascii=False)
         print(f"[🧠 Saved full Bedrock response to: {debug_path.resolve()}]")
 
+    # Extract text and citations
     answer = response.get("output", {}).get("text", "")
     citations = response.get("citations", [])
     retrievals = []
     for c in citations:
         retrievals.extend(c.get("retrievedReferences", []))
+
+    # Local post-filtering for completeness (if citations have scores)
+    filtered = [r for r in retrievals if r.get("score", 0.0) >= score_threshold]
+    response["filteredReferences"] = filtered
+
+    print(f"[ℹ️ Generated answer with {len(filtered)} filtered references (≥ {score_threshold})]")
     return answer
+
+
 
 
 

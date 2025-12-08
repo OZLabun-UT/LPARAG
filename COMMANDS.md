@@ -111,34 +111,36 @@ https://github.com/Mahdisadjadi/arxivscraper
     Can we figure out how to see relevant appendices when there's not much nat lang there?
 
     * Get name that we want to use as domain name
-    * Keep a version with smaller controlled knowledge base
     * Make tabulated data out of images im2graph
-    * Fix metadata being wrapped in caption
     * Add help features and tutorials
     * Relevance threshold
     * Wikipedia scraper and openstax?
     * APS Physiscs Magazine
-    * Arxiv scraper
-    * Switch models
-    * Mark junk
     * Exclude top relevance for new info?
     * Make a comprehensive system prompt
     * Add back button to pdf upload
-    * "Use your general knowledge"
     * Save all logs
     * Most relevant 20 papers not just 2
-    * Fix knowledge base resync to reload data sources
-    * Fix paper upload to register new buckets as data sources
+    * Make an llm that operates on Ou's subset
+
+    * THE PREAMBLES AFFECT THE RETURNED SOURCES AND SCORES?
 
     Done:
     * Save conversations to the side for people to flip back and forth
+    * "Use your general knowledge"
+    * Fix metadata being wrapped in caption
     * Convos saved in local memory
+    * Switch models
+    * Mark junk
     * Stop multiple of same paper from being in database
     * Fix button UI
+    * Arxiv scraper
     * Fix ui hide button
     * Returned images should be indexed and kept in the llm memory (maybe make them selectable)
     * Failed uploads 
     * Make it show returned relevance scores
+    * Fix knowledge base resync to reload data sources
+    * Fix paper upload to register new buckets as data sources
 
 [Unit]
 Description=Tau FastAPI Service
