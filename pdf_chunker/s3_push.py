@@ -14,6 +14,23 @@ load_dotenv(override=True)
 AWS_REGION = "us-east-2"
 
 
+def parse_bucket_arg(args: list[str]) -> tuple[list[str], str | None]:
+    """Extract --bucket BUCKET_NAME from args."""
+    if "--bucket" in args:
+        idx = args.index("--bucket")
+        try:
+            bucket = args[idx + 1]
+        except IndexError:
+            print("[!] --bucket requires a value")
+            sys.exit(2)
+
+        # remove flag + value from args
+        new_args = args[:idx] + args[idx + 2 :]
+        return new_args, bucket
+
+    return args, None
+
+
 def get_md5(file_path: Path) -> str:
     """Return MD5 hash of a file."""
     hash_md5 = hashlib.md5()
@@ -152,11 +169,12 @@ def resync_knowledge_base(kb_id: str, region: str = AWS_REGION):
 
 
 if __name__ == "__main__":
-    # Usage:
-    #   python s3_push.py [output_dir]
-    #   python s3_push.py --resync-only
     args = sys.argv[1:]
-    bucket_name = os.getenv("PDF_BUCKET")
+
+    # parse --bucket
+    args, cli_bucket = parse_bucket_arg(args)
+
+    bucket_name = cli_bucket or os.getenv("PDF_BUCKET")
     kb_id = os.getenv("KB_ID")
 
     if not args:
@@ -170,10 +188,11 @@ if __name__ == "__main__":
         resync_knowledge_base(kb_id)
         sys.exit(0)
 
-    local_output = Path(args[0])
     if not bucket_name:
-        print("[!] Missing PDF_BUCKET in environment")
+        print("[!] Missing bucket. Use --bucket or set PDF_BUCKET")
         sys.exit(2)
+
+    local_output = Path(args[0])
 
     sync_to_s3(local_output, bucket_name)
 

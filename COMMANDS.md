@@ -29,10 +29,12 @@ python3 -m aws_interface.main
 
 ngrok --config /home/murtato/snap/ngrok/315/.config/ngrok/ngrok.yml http 8000
 
+# Push to specific bucket
 
+python s3_push.py output/ --bucket cosmology-paper-1
 
 # Use PDF Chunker
-
+cd pdf_chunker
 python new_chunker.py ./pdfs
 
 python s3_push.py
@@ -125,6 +127,8 @@ https://github.com/Mahdisadjadi/arxivscraper
 
     * THE PREAMBLES AFFECT THE RETURNED SOURCES AND SCORES?
 
+    * Need to fix AmazonBedrockExecutionRoleForKnowledgeBase_c0q2t
+
     Done:
     * Save conversations to the side for people to flip back and forth
     * "Use your general knowledge"
@@ -142,6 +146,7 @@ https://github.com/Mahdisadjadi/arxivscraper
     * Fix knowledge base resync to reload data sources
     * Fix paper upload to register new buckets as data sources
 
+sudo tee /etc/systemd/system/tau.service > /dev/null <<'EOF'
 [Unit]
 Description=Tau FastAPI Service
 After=network.target
@@ -150,9 +155,14 @@ After=network.target
 User=ubuntu
 WorkingDirectory=/home/ubuntu/tau-topical-expert
 EnvironmentFile=/home/ubuntu/tau-topical-expert/.env
-ExecStart=/home/ubuntu/tau-topical-expert/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+ExecStart=/home/ubuntu/tau-topical-expert/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
+EOF
 
+sudo systemd-analyze verify /etc/systemd/system/tau.service
+sudo systemctl daemon-reload
+sudo systemctl start tau
+systemctl status tau.service

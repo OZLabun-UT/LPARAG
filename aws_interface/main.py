@@ -21,6 +21,9 @@ from pdf_chunker.new_chunker import extract_text_for_session
 from io import BytesIO
 from PIL import Image
 from datetime import datetime
+from aws_interface.master_router import run_master_query
+from fastapi.staticfiles import StaticFiles
+
 
 
 # -----------------------
@@ -98,6 +101,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 # Serve the favicon directly
 @app.get("/favicon.ico", include_in_schema=False)
@@ -940,6 +946,22 @@ async def download_arxiv_pdfs(request: Request):
     except Exception as e:
         import traceback; traceback.print_exc()
         return {"error": str(e)}
+    
+
+@app.post("/master_query")
+async def master_query(request: Request):
+    data = await request.json()
+    question = data.get("question")
+
+    if not question:
+        return {"error": "Missing question"}
+
+    # Use a cheap / fast model for routing + answers
+    model_arn = get_model_arn("Claude Haiku 4.5")
+
+    result = run_master_query(question, model_arn)
+    return result
+
 
 
 # -----------------------

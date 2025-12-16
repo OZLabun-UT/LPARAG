@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Master RAG Router Test</title>
+  <style>
+    body { font-family: sans-serif; background: #0d1117; color: #f3f4f6; padding: 2rem; }
+    textarea { width: 100%; height: 120px; background: #1e2531; color: white; border-radius: 8px; padding: 1rem; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; background: #2563eb; border: none; border-radius: 8px; color: white; cursor: pointer; }
+    pre { background: #111827; padding: 1rem; border-radius: 8px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h2>🧠 Master Knowledge Router</h2>
+  <p>Enter a question. The system will automatically route it to the correct sub-KB(s).</p>
+
+  <textarea id="q" placeholder="Ask something spanning AI, cosmology, or LWFA..."></textarea>
+  <br />
+  <button onclick="run()">Run Query</button>
+
+  <h3>Response</h3>
+  <pre id="out">(waiting)</pre>
+
+  <script>
+    async function run() {
+      const q = document.getElementById('q').value.trim();
+      if (!q) return;
+
+      const res = await fetch('/master_query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q })
+      });
+
+      const data = await res.json();
+      document.getElementById('out').textContent = JSON.stringify(data, null, 2);
+    }
+  </script>
+</body>
+</html>
