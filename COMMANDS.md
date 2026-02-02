@@ -2,7 +2,6 @@
 
 Instructions:
 
-
 sudo bash run_space.sh
 docker compose up -d
 
@@ -24,6 +23,12 @@ source .venv/bin/activate
 python -m aws_interface.main
 python3 -m aws_interface.main
 
+# See bucket IDs
+
+aws bedrock-agent list-knowledge-bases \
+  --region us-east-2 \
+  --output table
+
 
 # Forward
 
@@ -31,7 +36,7 @@ ngrok --config /home/murtato/snap/ngrok/315/.config/ngrok/ngrok.yml http 8000
 
 # Push to specific bucket
 
-python s3_push.py output/ --bucket cosmology-paper-1
+python s3_push.py pdfs/ --bucket lpa-general-1 --chunk-s3-only
 
 # Use PDF Chunker
 cd pdf_chunker
@@ -124,6 +129,14 @@ https://github.com/Mahdisadjadi/arxivscraper
     * Save all logs
     * Most relevant 20 papers not just 2
     * Make an llm that operates on Ou's subset
+    * Title of file as article title
+    * Master json to check duplicates
+    * Can we structure router prompt with clear heirarchical logic?
+    * For now: do pic and learn physics, later learn GNN, connect to llm eventually
+      * Notes on pic code from someone and one is lwfa
+      * High power laser matter interactions
+      * Save all questions that you have about it
+      * 
 
     * THE PREAMBLES AFFECT THE RETURNED SOURCES AND SCORES?
 

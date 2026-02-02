@@ -167,19 +167,107 @@ def resync_knowledge_base(kb_id: str, region: str = AWS_REGION):
         job_id = resp["ingestionJob"]["ingestionJobId"]
         print(f"   ↳ job_id = {job_id}")
 
+def upload_only_to_s3(local_folder: Path, bucket_name: str, prefix="kb-data"):
+    """
+    Upload local_folder to the specified S3 bucket ONLY.
+    No Bedrock calls. No auto-discovery. No ingestion.
+    """
+
+    local_path = Path(local_folder)
+    if not local_path.exists():
+        print(f"[!] Folder not found: {local_path}")
+        sys.exit(2)
+
+    folder_name = local_path.name
+    s3_prefix = f"{prefix}/{folder_name}/"
+
+    # --- Check for duplicates ---
+    if folder_exists_in_s3(bucket_name, s3_prefix):
+        if duplicate_pdfs_exist(bucket_name, local_path, s3_prefix):
+            print("[⏭] Upload skipped due to duplicates.")
+            return
+
+    print(f"[•] Uploading {local_folder} → s3://{bucket_name}/{s3_prefix} ...")
+
+    subprocess.run(
+        [
+            "aws", "s3", "sync",
+            str(local_path),
+            f"s3://{bucket_name}/{s3_prefix}/",
+            "--exact-timestamps"
+        ],
+        check=True
+    )
+
+    print(f"[✓] Upload complete: s3://{bucket_name}/{s3_prefix}")
+
+    # --- Optional cleanup ---
+    try:
+        shutil.rmtree(local_path)
+        print(f"[🗑] Deleted local folder after upload: {local_folder}")
+    except Exception as e:
+        print(f"[!] Cleanup failed: {e}")
+
+def chunk_and_upload_s3_only(
+    pdf_input_dir: Path,
+    bucket_name: str,
+    prefix: str = "kb-data"
+):
+    """
+    Runs the PDF chunking pipeline, then uploads the resulting output
+    to the specified S3 bucket ONLY. No Bedrock interaction.
+    """
+
+    pdf_input_dir = Path(pdf_input_dir)
+    if not pdf_input_dir.exists():
+        print(f"[!] PDF input dir not found: {pdf_input_dir}")
+        sys.exit(2)
+
+    print(f"[⚙️] Running chunker on {pdf_input_dir} ...")
+
+    subprocess.run(
+        ["python", "chunker.py"],
+        cwd=pdf_input_dir.parent,   # pdf_chunker/
+        check=True
+    )
+
+    output_dir = pdf_input_dir.parent / "output"
+
+    if not output_dir.exists():
+        print("[❌] Chunker did not produce output/")
+        sys.exit(2)
+
+    upload_only_to_s3(
+        local_folder=output_dir,
+        bucket_name=bucket_name,
+        prefix=prefix
+    )
+
+    print("[✅] Chunk + upload complete (no Bedrock).")
+
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-
-    # parse --bucket
     args, cli_bucket = parse_bucket_arg(args)
 
     bucket_name = cli_bucket or os.getenv("PDF_BUCKET")
-    kb_id = os.getenv("KB_ID")
 
     if not args:
-        print("[!] Missing arguments: specify output folder or --resync-only")
+        print("[!] Missing arguments")
         sys.exit(2)
+
+    if "--chunk-s3-only" in args:
+        args.remove("--chunk-s3-only")
+
+        if not bucket_name:
+            print("[!] Missing bucket. Use --bucket or set PDF_BUCKET")
+            sys.exit(2)
+
+        pdf_dir = Path(args[0])   # usually pdfs/
+        chunk_and_upload_s3_only(pdf_dir, bucket_name)
+        sys.exit(0)
+
+    kb_id = os.getenv("KB_ID")
 
     if "--resync-only" in args:
         if not kb_id:
@@ -193,7 +281,6 @@ if __name__ == "__main__":
         sys.exit(2)
 
     local_output = Path(args[0])
-
     sync_to_s3(local_output, bucket_name)
 
     if kb_id:

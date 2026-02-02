@@ -319,12 +319,30 @@ async def query_kb(query: dict, request: Request):
         # 1️⃣ Build prompt context
         combined_prompt = build_context(state, question, query)
 
-        # 2️⃣ Run Bedrock retrieval
+        """# 2️⃣ Run Bedrock retrieval
         response = run_retrieval(combined_prompt, result_limit, score_threshold)
         retrievals = response.get("retrievalResults", [])
         model_name = query.get("model_name", "Claude Sonnet 4")
         model_arn = get_model_arn(model_name)
-        generated_answer = run_generation(combined_prompt, retrievals, model_arn, result_limit, score_threshold)
+        generated_answer = run_generation(combined_prompt, retrievals, model_arn, result_limit, score_threshold) """
+
+        # 2️⃣ Route + retrieve + generate (router decides KB)
+        model_name = query.get("model_name", "Claude Sonnet 4")
+        model_arn = get_model_arn(model_name)
+
+        router_result = run_master_query(
+            question=combined_prompt,
+            model_arn=model_arn,
+            result_limit=result_limit,
+        )
+
+        generated_answer = router_result["answer"]
+
+        # Extract retrievals for downstream image/PDF processing
+        retrievals = []
+        for c in router_result.get("citations", []):
+            retrievals.extend(c.get("retrievedReferences", []))
+
 
 
         # 3️⃣ Process each retrieved paper
@@ -430,9 +448,6 @@ def run_retrieval(question, num_results=10, threshold=0.7):
     print(f"[ℹ️ Retrieved {len(results)} results, kept {len(filtered)} after threshold ≥ {threshold}]")
     response["retrievalResults"] = filtered
     return response
-
-
-
 
 def process_paper(bucket, base_dir, score, remaining_slots):
     """Handles one paper’s structured.json, figures, and PDF extraction."""
@@ -663,9 +678,6 @@ def run_generation(question: str, retrieved_chunks: list, model_arn: str,
 
     print(f"[ℹ️ Generated answer with {len(filtered)} filtered references (≥ {score_threshold})]")
     return answer
-
-
-
 
 
 
