@@ -1,6 +1,6 @@
-# Ragatoni - A Generalizable Topical Expert Agent
+# Ragatini - A Generalizable Topical Expert Agent
 
-Ragatoni is an AWS-enabled chatbot that retrieves and synthesizes answers to domain-specific questions using a user-built corpus. A standout feature of Ragatoni is displaying relevant plots and citations from the referenced documents, which can aid in literature search and review. This repository contains the main chatbot funcitonality, web UI, PDF document processor, AWS S3 uploader and syncer, and an Arxiv scraper.
+Ragatini is an AWS-enabled chatbot that retrieves and synthesizes answers to domain-specific questions using a user-built corpus. A standout feature of Ragatoni is displaying relevant plots and citations from the referenced documents, which can aid in literature search and review. This repository contains the main chatbot funcitonality, web UI, PDF document processor, AWS S3 uploader and syncer, and an Arxiv scraper.
 
 ---
 
