@@ -1,6 +1,6 @@
 # Ragatini - A Generalizable Topical Expert Agent
 
-Ragatini is an AWS-enabled chatbot that retrieves and synthesizes answers to domain-specific questions using a user-built corpus. A standout feature of Ragatoni is displaying relevant plots and citations from the referenced documents, which can aid in literature search and review. This repository contains the main chatbot funcitonality, web UI, PDF document processor, AWS S3 uploader and syncer, and an Arxiv scraper.
+Ragatini is an AWS-enabled chatbot that retrieves and synthesizes answers to domain-specific questions using a user-built corpus. A standout feature of Ragatini is displaying relevant plots and citations from the referenced documents, which can aid in literature search and review. This repository contains the main chatbot funcitonality, web UI, PDF document processor, AWS S3 uploader and syncer, and an Arxiv scraper.
 
 ---
 
@@ -25,7 +25,7 @@ Ragatoni includes a full ingestion pipeline for scientific PDFs using the unstru
 ---
 
 ### ☁️ AWS Bedrock Integration
-Ragatoni relies on **AWS Bedrock Knowledge Bases**. Documents that are deconstructed are uploaded to AWS S3 buckets, where they can act as data sources for knowledge bases. Knowledge bases are RAG agents that have access to the documents and can answer domain-relevant questions and return topical documents to the user. Ragatoni has figure retrieval functionality that shows extracted images and figures from relevant documents, and will show citations along with the relevance score for each document.
+Ragatoni relies on **AWS Bedrock Knowledge Bases**. Documents that are deconstructed are uploaded to AWS S3 buckets, where they can act as data sources for knowledge bases. Knowledge bases are RAG agents that have access to the documents and can answer domain-relevant questions and return topical documents to the user. Ragatini has figure retrieval functionality that shows extracted images and figures from relevant documents, and will show citations along with the relevance score for each document.
 
 ## System Architecture
 
@@ -92,12 +92,12 @@ ragtime/
 
 └── systemd/
 
-    └── ragtime.service        # Production deployment
+    └── ragatini.service        # Production deployment
 
 
 # Setup
 
-To set up Ragatoni, an AWS account is needed, and full Bedrock and S3 permissions are necessary. Additionally, it is convenient to run instances of Ragatoni on AWS EC2, so permissions for EC2 are also recommended. After creating an account with the needed permissions, the following environment variables must be placed in an .env file:
+To set up Ragatini, an AWS account is needed, and full Bedrock and S3 permissions are necessary. Additionally, it is convenient to run instances of Ragatini on AWS EC2, so permissions for EC2 are also recommended. After creating an account with the needed permissions, the following environment variables must be placed in an .env file:
 
 *FILL THIS OUT*
 
