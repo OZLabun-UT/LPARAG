@@ -14,6 +14,14 @@
       justify-content: center;
       height: 100vh;
     }
+    .nav {
+      position: absolute;
+      top: 1.25rem;
+      left: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
     .container {
       background: #1e2531;
       padding: 2rem 3rem;
@@ -41,6 +49,17 @@
       font-weight: bold;
       cursor: pointer;
     }
+    .button-secondary {
+      margin-top: 0;
+      padding: 0.55rem 0.9rem;
+      background: transparent;
+      border: 1px solid rgba(96, 165, 250, 0.55);
+      color: #cbd5e1;
+      font-weight: 600;
+    }
+    .button-secondary:hover {
+      border-color: rgba(96, 165, 250, 0.9);
+    }
     #status {
       margin-top: 1rem;
       font-size: 0.95rem;
@@ -48,6 +67,9 @@
   </style>
 </head>
 <body>
+  <div class="nav">
+    <button id="backBtn" class="button-secondary" type="button">← Back</button>
+  </div>
   <div class="container">
     <h2>📦 Batch Upload Papers</h2>
     <p>Upload multiple PDFs to the knowledge base at once.</p>
@@ -57,6 +79,12 @@
   </div>
 
   <script>
+    // Back button: prefer history, fallback to main chat page.
+    document.getElementById("backBtn").addEventListener("click", () => {
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = "/chat";
+    });
+
     async function uploadBatch() {
       const files = document.getElementById("batchFiles").files;
       if (!files.length) return alert("Select at least one PDF.");

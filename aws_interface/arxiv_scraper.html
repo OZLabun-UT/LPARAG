@@ -6,6 +6,18 @@
   <style>
     body { background: #0d1117; color: #f3f4f6; font-family: Inter, sans-serif; padding: 2rem; }
     h1 { color: #8b5cf6; }
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
     input {
       margin: 0.5rem 0;
       padding: 0.6rem;
@@ -22,6 +34,17 @@
       margin-top: 1rem;
     }
     button:hover { opacity: 0.9; }
+    .button-secondary {
+      background: transparent;
+      border: 1px solid rgba(96, 165, 250, 0.55);
+      color: #cbd5e1;
+      margin-top: 0;
+      padding: 0.45rem 0.9rem;
+    }
+    .button-secondary:hover {
+      border-color: rgba(96, 165, 250, 0.9);
+      opacity: 1;
+    }
     .result {
       background: #1e2531;
       margin: 1rem 0;
@@ -33,7 +56,12 @@
   </style>
 </head>
 <body>
-  <h1>📄 arXiv Paper Downloader</h1>
+  <div class="nav">
+    <div class="nav-left">
+      <button id="backBtn" type="button" class="button-secondary">← Back</button>
+      <h1 style="margin: 0;">📄 arXiv Paper Downloader</h1>
+    </div>
+  </div>
   <p>Search and automatically download papers to your local directory.</p>
 
   <form id="fetchForm">
@@ -46,32 +74,71 @@
     <button type="submit">⬇️ Download Papers</button>
   </form>
 
+  <select class="field">
+    <option value="ti">Title</option>
+    <option value="abs">Abstract</option>
+    <option value="au">Author</option>
+  </select>
+  
+  <select class="op">
+    <option value="OR">OR</option>
+    <option value="AND">AND</option>
+    <option value="NOT">NOT</option>
+  </select>
+  
+  <input class="value" placeholder="search term">
+  
+
   
 
   <div id="results"></div>
 
   <script>
+    // Back button: prefer history, fallback to main chat page.
+    document.getElementById("backBtn").addEventListener("click", () => {
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = "/chat";
+    });
+
     document.getElementById("fetchForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const q = document.getElementById("query").value;
-      const cat = document.getElementById("category").value;
-      const limit = parseInt(document.getElementById("limit").value);
-
+    
+      // Example: hardcoded Boolean query (you’ll UI-ify this later)
+      const payload = {
+        groups: [
+          {
+            op: "OR",
+            terms: [
+              { field: "ti", value: "laser wakefield" },
+              { field: "abs", value: "plasma accelerator" }
+            ]
+          }
+        ],
+        and: [
+          { field: "cat", value: document.getElementById("category").value }
+        ],
+        not: [
+          { field: "abs", value: "simulation" }
+        ],
+        limit: parseInt(document.getElementById("limit").value)
+      };
+    
       const resBox = document.getElementById("results");
-      resBox.innerHTML = "<p>⏳ Fetching and downloading papers...</p>";
-
+      resBox.innerHTML = "<p>⏳ Fetching papers...</p>";
+    
       const res = await fetch("/fetch_arxiv_papers", {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({query: q, category: cat, limit})
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
+    
       const data = await res.json();
-
+    
       if (data.error) {
         resBox.innerHTML = `<p style="color:red;">Error: ${data.error}</p>`;
         return;
       }
-
+    
       let html = `<h2>Downloaded ${data.papers.length} Papers</h2>`;
       for (const p of data.papers) {
         html += `
@@ -83,8 +150,10 @@
           </div>
         `;
       }
+    
       resBox.innerHTML = html;
     });
-  </script>
+    </script>
+    
 </body>
 </html>

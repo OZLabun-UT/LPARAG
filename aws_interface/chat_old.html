@@ -36,6 +36,25 @@
     .toggle{position:absolute;top:1rem;right:1.5rem;background:none;border:none;
             font-size:1.3rem;color:var(--accent);cursor:pointer;transition:transform .2s;}
     .toggle:hover{transform:rotate(15deg);}
+    .nav-actions{
+      position: absolute;
+      top: 1rem;
+      left: 1.25rem;
+      display:flex;
+      gap:0.5rem;
+      align-items:center;
+    }
+    .nav-btn{
+      padding: 0.45rem 0.85rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+    }
+    .nav-btn:hover{border-color: var(--accent);}
     main{width:100%;max-width:1200px;display:flex;flex-direction:column;align-items:center;gap:1rem;}
     #chat{
       background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);
@@ -112,6 +131,9 @@
   </style>
 </head>
 <body>
+  <div class="nav-actions">
+    <button id="backBtn" class="nav-btn" type="button">← Back</button>
+  </div>
   <button id="themeToggle" class="toggle" title="Toggle theme">🌙</button>
   <header><h1>Knowledge Base Chat</h1></header>
   <main>
@@ -144,6 +166,12 @@
   </div>
 
   <script>
+    // Back button: prefer history, fallback to login.
+    document.getElementById("backBtn").addEventListener("click", () => {
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = "/";
+    });
+
     // Theme toggle
     const html=document.documentElement;
     const toggleBtn=document.getElementById('themeToggle');

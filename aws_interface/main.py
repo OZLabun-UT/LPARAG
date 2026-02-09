@@ -832,6 +832,29 @@ async def upload_batch(request: Request, files: list[UploadFile] = File(...)):
 # ARXIV SCRAPER
 from arxivscraper import Scraper
 
+def compile_arxiv_query(payload: dict) -> str:
+    parts = []
+
+    # OR groups
+    for group in payload.get("groups", []):
+        if group["op"] == "OR":
+            terms = [
+                f'{t["field"]}:"{t["value"]}"'
+                for t in group["terms"]
+            ]
+            parts.append("(" + " OR ".join(terms) + ")")
+
+    # AND clauses
+    for t in payload.get("and", []):
+        parts.append(f'{t["field"]}:"{t["value"]}"')
+
+    # NOT clauses
+    for t in payload.get("not", []):
+        parts.append(f'ANDNOT {t["field"]}:"{t["value"]}"')
+
+    return " AND ".join(parts)
+
+
 @app.get("/arxiv", response_class=HTMLResponse)
 def serve_arxiv_ui():
     return open(Path(__file__).resolve().parent / "arxiv_scraper.html").read()
@@ -846,27 +869,37 @@ def serve_arxiv_ui():
 async def fetch_arxiv_papers(request: Request):
     import requests, feedparser, re
     from pathlib import Path
+    from urllib.parse import quote_plus
 
     try:
         params = await request.json()
-        query = params.get("query")
-        category = params.get("category") or ""
         limit = int(params.get("limit", 10))
 
-        print(f"[🔎] Fetching arXiv papers for '{query}', category='{category}', limit={limit}")
+        # Compile Boolean query → arXiv syntax
+        compiled_query = compile_arxiv_query(params)
+        encoded_q = quote_plus(compiled_query)
 
-        # Build query for title + abstract
-        q = f"all:{query}"
-        if category:
-            q += f"+AND+cat:{category}"
-        encoded_q = quote_plus(q)
-        url = f"https://export.arxiv.org/api/query?search_query={encoded_q}&start=0&max_results={limit}"
+        print("[🔎] Fetching arXiv papers with query:")
+        print(f"     {compiled_query}")
+        print(f"     limit={limit}")
+
+        url = (
+            "https://export.arxiv.org/api/query"
+            f"?search_query={encoded_q}"
+            f"&start=0&max_results={limit}"
+        )
 
         feed = feedparser.parse(url)
-        download_dir = Path(__file__).resolve().parent.parent / "pdf_chunker" / "pdfs"
+
+        download_dir = (
+            Path(__file__).resolve().parent.parent
+            / "pdf_chunker"
+            / "pdfs"
+        )
         download_dir.mkdir(parents=True, exist_ok=True)
 
         papers = []
+
         for entry in feed.entries:
             title = entry.title.strip().replace("\n", " ")
             authors = ", ".join(a.name for a in entry.authors)
@@ -874,7 +907,12 @@ async def fetch_arxiv_papers(request: Request):
             arxiv_id = entry.id.split("/abs/")[-1]
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
-            safe_name = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_") + ".pdf"
+            safe_name = (
+                re.sub(r"[^\w\s-]", "", title)
+                .strip()
+                .replace(" ", "_")
+                + ".pdf"
+            )
             pdf_path = download_dir / safe_name
 
             # Download PDF
@@ -885,7 +923,7 @@ async def fetch_arxiv_papers(request: Request):
                         f.write(resp.content)
                     print(f"[📄] Saved {pdf_path.name}")
                 else:
-                    print(f"[!] Failed to fetch {pdf_url}: {resp.status_code}")
+                    print(f"[!] Failed to fetch {pdf_url}: HTTP {resp.status_code}")
             except Exception as e:
                 print(f"[!] Error fetching {pdf_url}: {e}")
 
@@ -893,12 +931,18 @@ async def fetch_arxiv_papers(request: Request):
                 "title": title,
                 "authors": authors,
                 "abstract": abstract,
-                "pdf_url": pdf_url
+                "pdf_url": pdf_url,
             })
 
-        return {"papers": papers, "download_dir": str(download_dir)}
+        return {
+            "papers": papers,
+            "download_dir": str(download_dir),
+            "compiled_query": compiled_query,
+        }
+
     except Exception as e:
-        import traceback; traceback.print_exc()
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
 
@@ -975,9 +1019,10 @@ async def master_query(request: Request):
     return result
 
 
-
 # -----------------------
 # Run
 # -----------------------
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # NOTE: For --reload to work, uvicorn needs an import string (not the app object).
+    # This allows running via: python3 -m aws_interface.main
+    uvicorn.run("aws_interface.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -29,14 +29,13 @@ aws bedrock-agent list-knowledge-bases \
   --region us-east-2 \
   --output table
 
-
 # Forward
 
 ngrok --config /home/murtato/snap/ngrok/315/.config/ngrok/ngrok.yml http 8000
 
 # Push to specific bucket
 
-python s3_push.py pdfs/ --bucket lpa-general-1 --chunk-s3-only
+python s3_push.py pdfs/ --bucket lpa-simulation-1 --chunk-s3-only
 
 # Use PDF Chunker
 cd pdf_chunker
@@ -59,7 +58,6 @@ sudo apt update && sudo apt upgrade -y
 
 sudo apt update && sudo apt upgrade -y
 sudo apt install git python3-pip python3-venv nginx -y
-
 
 Run:
  uvicorn app:app --host 0.0.0.0 --port 8000
@@ -112,6 +110,7 @@ Claude Opus 4.1
 
 
 # To-dos
+
 https://github.com/Mahdisadjadi/arxivscraper
 
     Figure out how to make it so ppl can make accounts and stuff
@@ -136,11 +135,15 @@ https://github.com/Mahdisadjadi/arxivscraper
       * Notes on pic code from someone and one is lwfa
       * High power laser matter interactions
       * Save all questions that you have about it
-      * 
 
     * THE PREAMBLES AFFECT THE RETURNED SOURCES AND SCORES?
-
     * Need to fix AmazonBedrockExecutionRoleForKnowledgeBase_c0q2t
+
+    * Do real smilei case
+    * Finish populating buckets
+    * Test set make it easy for ou and lance to populate
+      * maybe multiple
+    * Keep reading textbook
 
     Done:
     * Save conversations to the side for people to flip back and forth

@@ -53,9 +53,32 @@
       transition:background .3s,color .3s;
     }
     header{display:flex;justify-content:center;align-items:center;padding:1rem 0;}
+    .nav-actions{
+      position: absolute;
+      top: 1rem;
+      left: 1.25rem;
+      display:flex;
+      gap:0.5rem;
+      align-items:center;
+      z-index: 120;
+    }
+    .nav-btn{
+      padding: 0.45rem 0.85rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+    }
+    .nav-btn:hover{
+      border-color: var(--accent);
+    }
     h1{
       font-family:'Orbitron',sans-serif;font-weight:800;font-size:2.3rem;
       background:linear-gradient(90deg,var(--primary),var(--accent));
+      background-clip:text;
       -webkit-background-clip:text;-webkit-text-fill-color:transparent;
     }
     .toggle{position:absolute;top:1rem;right:1.5rem;background:none;border:none;
@@ -391,6 +414,10 @@
   </style>
 </head>
 <body>
+  <div class="nav-actions">
+    <button id="backBtn" class="nav-btn" type="button">← Back</button>
+    <button id="logoutBtn" class="nav-btn" type="button" title="Clear session and return to login">Logout</button>
+  </div>
   <button id="themeToggle" class="toggle" title="Toggle theme">🌙</button>
   <header><h1>Knowledge Base Chat</h1></header>
   <div id="uploading" style="display:none;align-items:center;justify-content:center;gap:10px;color:var(--accent);font-weight:500;">
@@ -498,6 +525,16 @@
   </div>
 
   <script>
+    // Navigation helpers
+    document.getElementById("backBtn").addEventListener("click", () => {
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = "/";
+    });
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      sessionStorage.removeItem("auth");
+      window.location.href = "/";
+    });
+
     const html=document.documentElement;
     const toggleBtn=document.getElementById('themeToggle');
     const savedTheme=localStorage.getItem('theme');

@@ -29,9 +29,6 @@ bedrock_agent = boto3.client(
     region_name=AWS_REGION
 )
 
-# ------------------------------------------------------------------
-# Router model (cheap + deterministic)
-# ------------------------------------------------------------------
 ROUTER_MODEL_ARN = os.getenv(
     "ROUTER_MODEL_ARN",
     # sensible default
@@ -65,9 +62,8 @@ You are a routing classifier.
 Choose the SINGLE most relevant domain.
 
 Domains:
-- lwfa: laser wakefield acceleration, plasma physics, betatron radiation
-- ai: machine learning, LLMs, model training, evaluation
-- cosmology: CMB, inflation, dark matter, large-scale structure
+- lwfa simulation: laser wakefield acceleration simulation, computational methods, and code
+- lwfa: CMB, inflation, dark matter, large-scale structure
 
 Return ONLY one of:
 "lwfa", "ai", or "cosmology"
