@@ -36,37 +36,38 @@ ROUTER_MODEL_ARN = os.getenv(
 )
 
 # ------------------------------------------------------------------
-# Knowledge base registry
+# Knowledge base registry (IDs from env; see .env.example)
 # ------------------------------------------------------------------
 KB_REGISTRY = {
-    "lwfa": os.getenv("KB_LWFA_ID"),
-    "lwfa-simulation-1": os.getenv("KB_SIM1_ID"),
-    "lwfa-simulation-2": os.getenv("KB_SIM2_ID"),
-    "lwfa-experiment-1": os.getenv("KB_EXP1_ID"),
-    "lwfa-experiment-2": os.getenv("KB_EXP2_ID"),
+    "lwfa-sim": os.getenv("KB_LWFA_SIM_ID"),
+    "lwfa-not-sim": os.getenv("KB_LWFA_NOT_SIM_ID"),
+    "pwa": os.getenv("KB_PWA_ID"),
+    "swa": os.getenv("KB_SWA_ID"),
 }
 
-DEFAULT_DOMAIN = "lwfa"
+DEFAULT_DOMAIN = "lwfa-sim"
 
 # ------------------------------------------------------------------
 # 1) Router classifier
 # ------------------------------------------------------------------
 def classify_query(question: str) -> str:
     """
-    Returns ONE domain key: 'lwfa', 'ai', or 'cosmology'
+    Returns ONE domain key: 'lwfa-sim', 'lwfa-not-sim', 'pwa', or 'swa'
     """
 
     prompt = f"""
-You are a routing classifier.
+You are a routing classifier for particle accelerator physics.
 
-Choose the SINGLE most relevant domain.
+Choose the SINGLE most relevant domain for the question.
 
 Domains:
-- lwfa simulation: laser wakefield acceleration simulation, computational methods, and code
-- lwfa: CMB, inflation, dark matter, large-scale structure
+- lwfa-sim: Laser wakefield acceleration (simulation) — PIC codes, simulations, computational methods, numerical modeling, code (e.g. WarpX, OSIRIS, EPOCH, Smilei)
+- lwfa-not-sim: Laser wakefield acceleration (not simulation) — experimental LWFA, laser-plasma experiments, diagnostics, beam characterization, real-world LWFA
+- pwa: Plasma wakefield acceleration — beam-driven PWA, plasma wakefield, PWFA (not laser-driven)
+- swa: Structure wakefield acceleration — dielectric wakefield, metallic structures, DLWFA, structure-based acceleration
 
 Return ONLY one of:
-"lwfa", "ai", or "cosmology"
+"lwfa-sim", "lwfa-not-sim", "pwa", or "swa"
 
 Question:
 {question}

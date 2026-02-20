@@ -99,7 +99,12 @@ ragtime/
 
 To set up Ragatoni, an AWS account is needed, and full Bedrock and S3 permissions are necessary. Additionally, it is convenient to run instances of Ragatoni on AWS EC2, so permissions for EC2 are also recommended. After creating an account with the needed permissions, the following environment variables must be placed in an .env file:
 
-*FILL THIS OUT*
+- **KB_LWFA_SIM_ID** — Laser wakefield acceleration (simulation) knowledge base
+- **KB_LWFA_NOT_SIM_ID** — Laser wakefield acceleration (experimental/non-simulation) knowledge base
+- **KB_PWA_ID** — Plasma wakefield acceleration knowledge base
+- **KB_SWA_ID** — Structure wakefield acceleration knowledge base
+- **AWS_REGION** — AWS region (e.g. us-east-2)
+- Model ARNs, CHAT_PASSWORD, etc. — see `.env.example` for a template
 
 The required packages can be installed using:
 
@@ -118,7 +123,7 @@ Where you can find your available buckets with the command:
 
 ``aws bedrock-agent list-knowledge-bases \ --region us-east-2 \ --output table``
 
-Afterwards, connect your S3 bucket to a knowledge base through the AWS dashboard and save the knowledge base ID as an environment variable: **Specify which variable**
+Afterwards, connect your S3 bucket to a knowledge base through the AWS dashboard and save each knowledge base ID as the appropriate environment variable (KB_LWFA_SIM_ID, KB_LWFA_NOT_SIM_ID, KB_PWA_ID, or KB_SWA_ID)
 
 Then, simply run the main python file using:
 

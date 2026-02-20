@@ -13,5 +13,7 @@ dist/
 venv/
 pdf_chunker/output/
 pdf_chunker/pdfs/
+pdf_chunker/pdfs2/
+pdf_chunker/pipeline_pdfs/
 *.pem
 .vscode

@@ -1,0 +1,18 @@
+{
+  "groups": [
+    {
+      "op": "OR",
+      "terms": [
+        { "field": "ti", "value": "laser wakefield" },
+        { "field": "abs", "value": "plasma accelerator" }
+      ]
+    }
+  ],
+  "and": [
+    { "field": "cat", "value": "physics.plasm-ph" }
+  ],
+  "not": [
+    { "field": "abs", "value": "simulation" }
+  ],
+  "limit": 10
+}

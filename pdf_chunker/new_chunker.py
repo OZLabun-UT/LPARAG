@@ -1,4 +1,5 @@
 # docling_chunker.py
+import gc
 import os
 import sys
 import shutil
@@ -47,14 +48,6 @@ def extract_with_docling(pdf_path: Path, output_root: Path = Path("output")):
     json_path = base / "structured.json"
     dl_doc.save_as_json(
         filename=json_path,
-        artifacts_dir=images_dir,               
-        image_mode=ImageRefMode.REFERENCED,
-    )
-
-        # --- save structured JSON + referenced images ---
-    json_path = base / "structured.json"
-    dl_doc.save_as_json(
-        filename=json_path,
         artifacts_dir=images_dir,
         image_mode=ImageRefMode.REFERENCED,
     )
@@ -78,7 +71,9 @@ def extract_with_docling(pdf_path: Path, output_root: Path = Path("output")):
 
     # --- chunk for RAG ---
     hf_tok = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-    tokenizer = HuggingFaceTokenizer(tokenizer=hf_tok, max_tokens=512)
+    # max_tokens=1024 to avoid "sequence length longer than max" warnings; truncation handles overflow
+    hf_tok.model_max_length = 1024
+    tokenizer = HuggingFaceTokenizer(tokenizer=hf_tok, max_tokens=1024)
     chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
 
     for i, chunk in enumerate(chunker.chunk(dl_doc), start=1):
@@ -103,8 +98,8 @@ def extract_text_for_session(pdf_path: Path) -> str:
 
 
 if __name__ == "__main__":
-    input_dir = Path("pdfs")
-    output_dir = Path("output")
+    input_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("pdfs")
+    output_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("output")
 
     if not input_dir.exists():
         sys.exit(f"[!] Input dir '{input_dir}' missing")
@@ -116,3 +111,4 @@ if __name__ == "__main__":
     print(f"[•] Found {len(pdfs)} PDFs")
     for pdf in tqdm(pdfs, desc="Processing PDFs"):
         extract_with_docling(pdf, output_dir)
+        gc.collect()  # free memory between PDFs to avoid OOM on long runs

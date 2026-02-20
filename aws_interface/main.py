@@ -120,6 +120,23 @@ def parse_s3_uri(uri: str):
         return None, None
     return match.group(1), match.group(2)
 
+
+def resolve_paper_root(key: str, base_dir: str) -> str:
+    """
+    Resolve the S3 chunk key to the paper root directory.
+    Bedrock returns chunk paths like .../chunks/text/chunk_001.txt or .../text/page_1.txt.
+    Images, structured.json, and PDFs live at the paper root (parent of text/chunks).
+    """
+    # new_chunker (Docling): .../paper-name/chunks/text/chunk_001.txt
+    if "/chunks/text" in key:
+        return key.split("/chunks/text")[0].rstrip("/")
+    # old chunker (PyMuPDF): .../paper-name/text/page_1.txt
+    if "/text/" in key:
+        return key.split("/text/")[0].rstrip("/")
+    if key.endswith("/text"):
+        return key[:-5].rstrip("/")
+    return base_dir
+
 @app.post("/delete_s3_object")
 async def delete_s3_object(request: Request):
     data = await request.json()
@@ -360,12 +377,13 @@ async def query_kb(query: dict, request: Request):
                 continue
 
             base_dir = "/".join(key.split("/")[:-1])
-            if base_dir in processed_folders:
+            paper_root = resolve_paper_root(key, base_dir)
+            if paper_root in processed_folders:
                 continue
-            processed_folders.add(base_dir)
+            processed_folders.add(paper_root)
 
             # Process one full paper (structured.json + figures + pdf)
-            links, pdfs, img_count = process_paper(bucket, base_dir, score, image_limit - total_images)
+            links, pdfs, img_count = process_paper(bucket, paper_root, base_dir, score, image_limit - total_images)
             all_links.extend(links)
             pdf_links.extend(pdfs)
             total_images += img_count
@@ -449,17 +467,17 @@ def run_retrieval(question, num_results=10, threshold=0.7):
     response["retrievalResults"] = filtered
     return response
 
-def process_paper(bucket, base_dir, score, remaining_slots):
+def process_paper(bucket, paper_root, base_dir, score, remaining_slots):
     """Handles one paper’s structured.json, figures, and PDF extraction."""
     links, pdf_links, total_added = [], [], 0
 
-    structured_data = load_structured_json(bucket, base_dir)
+    structured_data = load_structured_json(bucket, paper_root, base_dir)
     text_map = {t["self_ref"]: t for t in structured_data.get("texts", [])} if structured_data else {}
     pic_map = extract_caption_and_context(structured_data, text_map)
 
-    valid_images = find_images_for_paper(bucket, base_dir)
+    valid_images = find_images_for_paper(bucket, paper_root, base_dir)
     if not valid_images:
-        print(f"[📂] No valid images under {base_dir}")
+        print(f"[📂] No valid images under {paper_root} (resolved from {base_dir})")
 
     for idx, key in enumerate(valid_images[:remaining_slots]):
         img_info = make_presigned(bucket, key)
@@ -470,34 +488,50 @@ def process_paper(bucket, base_dir, score, remaining_slots):
         print(f"[🖼] Added image: {Path(key).name}")
 
     # Add one PDF per paper
-    pdf_info = find_pdf_for_paper(bucket, base_dir, score)
+    pdf_info = find_pdf_for_paper(bucket, paper_root, base_dir, score)
     if pdf_info:
         pdf_links.append(pdf_info)
 
     return links, pdf_links, total_added
 
 
-def load_structured_json(bucket, base_dir):
-    """Loads structured.json for the given paper, if present."""
-    key = f"{base_dir}/structured.json"
-    try:
-        obj = s3.get_object(Bucket=bucket, Key=key)
-        data = json.loads(obj["Body"].read())
-        print(f"[📄] Loaded structured.json for {base_dir}")
-        return data
-    except Exception as e:
-        print(f"[!] No structured.json found for {base_dir}: {e}")
-        return {}
+def load_structured_json(bucket, paper_root, base_dir):
+    """Loads structured.json for the given paper, trying multiple common paths."""
+    candidates = [
+        f"{paper_root}/structured.json",
+        f"{base_dir}/structured.json",
+    ]
+    for key in candidates:
+        try:
+            obj = s3.get_object(Bucket=bucket, Key=key)
+            data = json.loads(obj["Body"].read())
+            print(f"[📄] Loaded structured.json from {key}")
+            return data
+        except Exception:
+            continue
+    print(f"[!] No structured.json found for paper_root={paper_root}, base_dir={base_dir}")
+    return {}
 
 
-def find_images_for_paper(bucket, base_dir):
-    """Collects all valid image keys across several common paths."""
-    paper_name = Path(base_dir).name
+def find_images_for_paper(bucket, paper_root, base_dir):
+    """Collects all valid image keys across several common paths.
+    Handles both new_chunker (Docling) and old chunker (PyMuPDF) layouts.
+    """
+    paper_name = Path(paper_root).name
     prefixes = [
-        f"{base_dir}/output/{paper_name}/images/",
-        f"{base_dir}/output/images/",
-        f"{base_dir}/{paper_name}/images/",
+        # new_chunker (Docling): paper_root/images/
+        f"{paper_root}/images/",
+        # old chunker (PyMuPDF): paper_root/images/, paper_root/figures/
+        f"{paper_root}/figures/",
+        # nested output layouts
+        f"{paper_root}/output/{paper_name}/images/",
+        f"{paper_root}/output/images/",
+        f"{paper_root}/{paper_name}/images/",
+        # fine_grain_chunker: chunks/images/
+        f"{paper_root}/chunks/images/",
+        # fallback: base_dir (e.g. when chunk came from /text/)
         f"{base_dir}/images/",
+        f"{base_dir}/figures/",
     ]
     found = []
     for prefix in prefixes:
@@ -607,18 +641,21 @@ def extract_surrounding_context(structured_data, page_no, max_chars=800):
     return joined if joined else "No context available"
 
 
-def find_pdf_for_paper(bucket, base_dir, score):
-    """Locate the PDF file for a paper."""
-    try:
-        resp = s3.list_objects_v2(Bucket=bucket, Prefix=base_dir)
-        for obj in resp.get("Contents", []):
-            if obj["Key"].lower().endswith(".pdf"):
-                pdf_info = make_presigned(bucket, obj["Key"])
-                pdf_info["relevance"] = round(float(score), 3)
-                print(f"[📄] Added PDF {pdf_info['display_name']} (score={pdf_info['relevance']})")
-                return pdf_info
-    except Exception as e:
-        print(f"[!] Could not list {base_dir}: {e}")
+def find_pdf_for_paper(bucket, paper_root, base_dir, score):
+    """Locate the PDF file for a paper. Searches paper root and common subpaths."""
+    search_prefixes = [paper_root, base_dir]
+    for prefix in search_prefixes:
+        try:
+            resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            for obj in resp.get("Contents", []):
+                k = obj["Key"]
+                if k.lower().endswith(".pdf"):
+                    pdf_info = make_presigned(bucket, k)
+                    pdf_info["relevance"] = round(float(score), 3)
+                    print(f"[📄] Added PDF {pdf_info['display_name']} (score={pdf_info['relevance']})")
+                    return pdf_info
+        except Exception as e:
+            print(f"[!] Could not list {prefix}: {e}")
     return None
 
 

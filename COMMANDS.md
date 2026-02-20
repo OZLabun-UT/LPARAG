@@ -23,6 +23,22 @@ source .venv/bin/activate
 python -m aws_interface.main
 python3 -m aws_interface.main
 
+
+cd pdf_chunker
+
+# Full runs (300 papers, 5 buckets each)
+python run_lwfa_sim_pipeline.py
+python run_lwfa_not_sim_pipeline.py
+python run_pwa_pipeline.py
+python run_swa_pipeline.py
+
+# Quick tests (10 papers, 2 buckets)
+python run_lwfa_sim_pipeline.py --test
+python run_lwfa_not_sim_pipeline.py --test
+python run_pwa_pipeline.py --test
+python run_swa_pipeline.py --test
+
+
 # See bucket IDs
 
 aws bedrock-agent list-knowledge-bases \
@@ -33,12 +49,65 @@ aws bedrock-agent list-knowledge-bases \
 
 ngrok --config /home/murtato/snap/ngrok/315/.config/ngrok/ngrok.yml http 8000
 
-# Push to specific bucket
+# Push to specific bucket (uses Docling/new_chunker; includes structured.json)
 
-python s3_push.py pdfs/ --bucket lpa-simulation-1 --chunk-s3-only
+python s3_push.py pdfs/ --bucket swa-general-3 --chunk-s3-only
+
+# Create new S3 bucket + chunk first 80 PDFs from pdfs2 + upload
+
+cd pdf_chunker
+python s3_push.py --create-bucket-and-upload my-new-bucket
+PDF_LIMIT=50 python s3_push.py --create-bucket-and-upload my-bucket  # custom limit
+
+# Full pipelines: arXiv → chunk → S3 (resume-safe)
+
+# How it works:
+# - PDFs are saved once to pdf_chunker/pipeline_pdfs/
+# - If that folder already has PDFs, download is skipped (safe to re-run after a crash)
+# - Papers are processed in batches of 8: chunk → upload to S3 → delete those 8 from the folder
+# - When the folder is empty, the run is done
+
+# --- PWA example (Plasma Wakefield, excluding laser wakefield) ---
+
+# From repo root. Quick test (10 papers, 2 buckets):
+cd pdf_chunker && python run_pwa_pipeline.py --test
+
+# Full run (300 papers, 5 buckets):
+cd pdf_chunker && python run_pwa_pipeline.py
+
+# What the PWA pipeline does:
+# - Query: "plasma wakefield acceleration" AND NOT "laser wakefield acceleration"
+# - Buckets: new-pwa-1, new-pwa-2, ... (2 with --test, 5 full)
+# - First run: downloads papers into pipeline_pdfs/, then processes in batches of 8
+# - If you stop and run again: skips download, continues with remaining PDFs
+
+# --- Other pipelines (same idea) ---
+
+cd pdf_chunker
+
+# LWFA + simulation
+python run_lwfa_sim_pipeline.py --test
+python run_lwfa_sim_pipeline.py
+
+# LWFA NOT simulation
+python run_lwfa_not_sim_pipeline.py --test
+python run_lwfa_not_sim_pipeline.py
+
+# Structure wakefield
+python run_swa_pipeline.py --test
+python run_swa_pipeline.py
+
+# Custom PDF folder
+PIPELINE_PDFS_DIR=/path/to/pdfs python run_pwa_pipeline.py --test
+
+# Download arXiv papers to pdfs2 (with query and boolean filters)
+
+cd pdf_chunker
+python arxiv_download.py "laser wakefield acceleration" --limit 10
+python arxiv_download.py -q "plasma accelerator" -c physics.plasm-ph -l 5 -o pdfs2
+python arxiv_download.py --query-file query.json --output pdfs2
 
 # Use PDF Chunker
-cd pdf_chunker
 python new_chunker.py ./pdfs
 
 python s3_push.py

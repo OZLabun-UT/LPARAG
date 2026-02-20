@@ -2,7 +2,9 @@ import boto3
 import os
 import sys
 import shutil
+import tempfile
 from dotenv import load_dotenv
+from botocore.exceptions import ClientError
 import subprocess
 from pathlib import Path
 import time
@@ -11,7 +13,7 @@ import re
 
 load_dotenv(override=True)
 
-AWS_REGION = "us-east-2"
+AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 
 
 def parse_bucket_arg(args: list[str]) -> tuple[list[str], str | None]:
@@ -61,6 +63,28 @@ def folder_exists_in_s3(bucket_name: str, prefix: str) -> bool:
         return False
 
 
+def ensure_bucket_exists(bucket_name: str, region: str | None = None) -> None:
+    """Create S3 bucket if it does not exist. Idempotent."""
+    region = region or AWS_REGION
+    s3 = boto3.client("s3", region_name=region)
+    bucket_name = bucket_name.lower().strip()
+    try:
+        if region == "us-east-1":
+            s3.create_bucket(Bucket=bucket_name)
+        else:
+            s3.create_bucket(
+                Bucket=bucket_name,
+                CreateBucketConfiguration={"LocationConstraint": region},
+            )
+        print(f"[🪣] Created bucket: {bucket_name}")
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in ("BucketAlreadyExists", "BucketAlreadyOwnedByYou"):
+            pass  # already exists
+        else:
+            raise
+
+
 def duplicate_pdfs_exist(bucket_name: str, local_folder: Path, s3_prefix: str) -> bool:
     """Check if PDFs in local_folder already exist in S3 with identical content."""
     s3 = boto3.client("s3", region_name=AWS_REGION)
@@ -105,11 +129,12 @@ def sync_to_s3(local_folder, bucket_name, prefix="kb-data"):
         if duplicate_pdfs_exist(bucket_name, local_path, s3_prefix):
             return  # skip upload if duplicates found and user chose not to overwrite
 
-    print(f"[•] Uploading {local_folder} → s3://{bucket_name}/{s3_prefix} ...")
+    s3_uri = f"s3://{bucket_name}/{s3_prefix.rstrip('/')}/"
+    print(f"[•] Uploading {local_folder} → {s3_uri}")
     subprocess.run([
-    "aws", "s3", "sync", str(local_folder),
-    f"s3://{bucket_name}/{s3_prefix}/",
-    "--exact-timestamps"
+        "aws", "s3", "sync", str(local_folder),
+        s3_uri,
+        "--exact-timestamps"
     ], check=True)
 
     print(f"[✓] Synced {local_folder} → s3://{bucket_name}/{s3_prefix}")
@@ -189,11 +214,12 @@ def upload_only_to_s3(local_folder: Path, bucket_name: str, prefix="kb-data"):
 
     print(f"[•] Uploading {local_folder} → s3://{bucket_name}/{s3_prefix} ...")
 
+    s3_uri = f"s3://{bucket_name}/{s3_prefix.rstrip('/')}/"
     subprocess.run(
         [
             "aws", "s3", "sync",
             str(local_path),
-            f"s3://{bucket_name}/{s3_prefix}/",
+            s3_uri,
             "--exact-timestamps"
         ],
         check=True
@@ -223,15 +249,15 @@ def chunk_and_upload_s3_only(
         print(f"[!] PDF input dir not found: {pdf_input_dir}")
         sys.exit(2)
 
-    print(f"[⚙️] Running chunker on {pdf_input_dir} ...")
+    print(f"[⚙️] Running Docling chunker (new_chunker) on {pdf_input_dir} ...")
 
+    script_dir = Path(__file__).resolve().parent
+    output_dir = pdf_input_dir.parent / "output"
     subprocess.run(
-        ["python", "chunker.py"],
-        cwd=pdf_input_dir.parent,   # pdf_chunker/
+        [sys.executable, str(script_dir / "new_chunker.py"), str(pdf_input_dir), str(output_dir)],
+        cwd=script_dir,  # ensure new_chunker imports work
         check=True
     )
-
-    output_dir = pdf_input_dir.parent / "output"
 
     if not output_dir.exists():
         print("[❌] Chunker did not produce output/")
@@ -246,6 +272,89 @@ def chunk_and_upload_s3_only(
     print("[✅] Chunk + upload complete (no Bedrock).")
 
 
+def create_bucket_and_upload_from_pdfs2(
+    bucket_name: str,
+    pdf_limit: int = 80,
+    pdf_offset: int = 0,
+    pdfs2_dir: Path | None = None,
+    region: str | None = None,
+    prefix: str = "kb-data",
+    pdf_batch_size: int = 8,
+) -> None:
+    """
+    Create a new S3 bucket, take PDFs from pdfs2 [offset:offset+limit], chunk with Docling,
+    and upload to the bucket. Processes in batches to reduce memory use (avoids OOM/SIGKILL).
+
+    Args:
+        bucket_name: Name for the new S3 bucket (must be globally unique, lowercase, 3-63 chars).
+        pdf_limit: Max number of PDFs to process (default: 80).
+        pdf_offset: Start index into sorted PDF list (default: 0).
+        pdfs2_dir: Path to pdfs2 folder (default: pdf_chunker/pdfs2).
+        region: AWS region for bucket (default: AWS_REGION).
+        prefix: S3 prefix for uploaded data (default: kb-data).
+        pdf_batch_size: PDFs per batch to avoid OOM/timeout (default: 8).
+    """
+    region = region or AWS_REGION
+    s3 = boto3.client("s3", region_name=region)
+
+    # Create bucket
+    bucket_name = bucket_name.lower().strip()
+    try:
+        if region == "us-east-1":
+            s3.create_bucket(Bucket=bucket_name)
+        else:
+            s3.create_bucket(
+                Bucket=bucket_name,
+                CreateBucketConfiguration={"LocationConstraint": region},
+            )
+        print(f"[🪣] Created bucket: {bucket_name}")
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in ("BucketAlreadyExists", "BucketAlreadyOwnedByYou"):
+            print(f"[ℹ️] Bucket {bucket_name} already exists, continuing")
+        else:
+            raise
+
+    # Resolve pdfs2 path
+    script_dir = Path(__file__).resolve().parent
+    pdfs2 = Path(pdfs2_dir) if pdfs2_dir else script_dir / "pdfs2"
+    if not pdfs2.exists():
+        raise FileNotFoundError(f"pdfs2 directory not found: {pdfs2}")
+
+    all_pdfs = sorted(pdfs2.glob("*.pdf"))
+    pdfs = all_pdfs[pdf_offset : pdf_offset + pdf_limit]
+    if not pdfs:
+        raise FileNotFoundError(
+            f"No PDFs in range [{pdf_offset}:{pdf_offset + pdf_limit}] (found {len(all_pdfs)} total in {pdfs2})"
+        )
+
+    print(f"[📂] Using PDFs {pdf_offset + 1}-{pdf_offset + len(pdfs)} of {len(all_pdfs)} from {pdfs2}")
+    if len(pdfs) > pdf_batch_size:
+        print(f"[📦] Processing in batches of {pdf_batch_size} to reduce memory use")
+
+    # Process in batches to avoid OOM
+    temp_root = Path(tempfile.mkdtemp(prefix="pdfs2_upload_"))
+    try:
+        for batch_start in range(0, len(pdfs), pdf_batch_size):
+            batch = pdfs[batch_start : batch_start + pdf_batch_size]
+            batch_num = batch_start // pdf_batch_size + 1
+            total_batches = (len(pdfs) + pdf_batch_size - 1) // pdf_batch_size
+            print(f"\n[📦] Batch {batch_num}/{total_batches} ({len(batch)} PDFs)")
+            temp_dir = temp_root / f"batch_{batch_num}"
+            temp_dir.mkdir()
+            for pdf in batch:
+                shutil.copy2(pdf, temp_dir / pdf.name)
+            chunk_and_upload_s3_only(temp_dir, bucket_name, prefix=prefix)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+        output_dir = temp_root.parent / "output"
+        if output_dir.exists():
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    print(f"[✅] Done: {len(pdfs)} papers chunked and uploaded to s3://{bucket_name}/{prefix}/")
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     args, cli_bucket = parse_bucket_arg(args)
@@ -255,6 +364,30 @@ if __name__ == "__main__":
     if not args:
         print("[!] Missing arguments")
         sys.exit(2)
+
+    if "--create-bucket-and-upload" in args:
+        args.remove("--create-bucket-and-upload")
+        bucket_name = (args[0] if args else None) or bucket_name
+        if not bucket_name:
+            print("[!] Bucket name required. Use: python s3_push.py --create-bucket-and-upload BUCKET_NAME")
+            sys.exit(2)
+        pdf_limit = int(os.getenv("PDF_LIMIT", "80"))
+        pdf_offset = int(os.getenv("PDF_OFFSET", "0"))
+        pdf_batch_size = int(os.getenv("PDF_BATCH_SIZE", "8"))
+        pdfs2_dir = Path(args[1]) if len(args) > 1 else None
+        try:
+            create_bucket_and_upload_from_pdfs2(
+                bucket_name=bucket_name,
+                pdf_limit=pdf_limit,
+                pdf_offset=pdf_offset,
+                pdfs2_dir=pdfs2_dir,
+                prefix="kb-data",
+                pdf_batch_size=pdf_batch_size,
+            )
+        except Exception as e:
+            print(f"[❌] {e}")
+            sys.exit(1)
+        sys.exit(0)
 
     if "--chunk-s3-only" in args:
         args.remove("--chunk-s3-only")
