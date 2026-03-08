@@ -6,6 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from dotenv import load_dotenv
 import os
+
+# Load environment variables BEFORE importing boto3-dependent modules
+load_dotenv(override=True)
+
 import boto3
 import re
 import mimetypes
@@ -29,7 +33,6 @@ from fastapi.staticfiles import StaticFiles
 # -----------------------
 # Environment & paths
 # -----------------------
-load_dotenv(override=True)
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # /rag-llm
 PDF_CHUNKER_DIR = BASE_DIR / "pdf_chunker"
@@ -130,11 +133,20 @@ def resolve_paper_root(key: str, base_dir: str) -> str:
     # new_chunker (Docling): .../paper-name/chunks/text/chunk_001.txt
     if "/chunks/text" in key:
         return key.split("/chunks/text")[0].rstrip("/")
+    # chunks in subdir: .../paper-name/chunks/...
+    if "/chunks/" in key:
+        return key.split("/chunks/")[0].rstrip("/")
     # old chunker (PyMuPDF): .../paper-name/text/page_1.txt
     if "/text/" in key:
         return key.split("/text/")[0].rstrip("/")
     if key.endswith("/text"):
         return key[:-5].rstrip("/")
+    # Walk up from base_dir until we reach a plausible paper root (has output/ or similar)
+    parts = base_dir.rstrip("/").split("/")
+    for i in range(len(parts) - 1, 0, -1):
+        candidate = "/".join(parts[: i + 1])
+        if "output" in candidate or "kb-data" in candidate:
+            return candidate
     return base_dir
 
 @app.post("/delete_s3_object")
@@ -160,12 +172,19 @@ def make_presigned(bucket: str, key: str):
         mime_type = "application/octet-stream"
     name = os.path.splitext(os.path.basename(key))[0]
     display_name = name.replace("_", " ").replace("-", " ").title().strip()
+    # S3 console URL to view object in AWS console
+    encoded_key = quote_plus(key)
+    s3_console_url = (
+        f"https://{REGION}.console.aws.amazon.com/s3/object/{bucket}"
+        f"?region={REGION}&prefix={encoded_key}"
+    )
     print(presigned_url)
     return {
         "source": f"s3://{bucket}/{key}",
         "url": presigned_url,
         "mime_type": mime_type,
         "display_name": display_name,
+        "s3_console_url": s3_console_url,
     }
 
 # -----------------------
@@ -360,7 +379,13 @@ async def query_kb(query: dict, request: Request):
         for c in router_result.get("citations", []):
             retrievals.extend(c.get("retrievedReferences", []))
 
-
+        # retrieve_and_generate citations don't include scores; fetch from retrieve() API
+        kb_id = router_result.get("kb_id")
+        score_map = {}
+        if kb_id:
+            score_map = build_score_map_from_retrieve(
+                kb_id, combined_prompt, num_results=min(50, result_limit * 5)
+            )
 
         # 3️⃣ Process each retrieved paper
         all_links, pdf_links, total_images = [], [], 0
@@ -368,7 +393,6 @@ async def query_kb(query: dict, request: Request):
 
         for r_idx, result in enumerate(retrievals):
             s3_uri = result.get("location", {}).get("s3Location", {}).get("uri")
-            score = result.get("score", 0.0)
             if not s3_uri:
                 continue
 
@@ -378,6 +402,8 @@ async def query_kb(query: dict, request: Request):
 
             base_dir = "/".join(key.split("/")[:-1])
             paper_root = resolve_paper_root(key, base_dir)
+            # Citations from retrieve_and_generate don't include score; look up from retrieve() results
+            score = score_map.get((bucket, paper_root), result.get("score", 0.0))
             if paper_root in processed_folders:
                 continue
             processed_folders.add(paper_root)
@@ -413,6 +439,14 @@ async def query_kb(query: dict, request: Request):
 # --------------------- HELPER FUNCTIONS ----------------------
 # ============================================================
 
+MATH_INSTRUCTION = (
+    "When you need to show mathematical expressions, use LaTeX format: "
+    "inline math with $...$ and display/block math with $$...$$. "
+    "Example: $E = mc^2$ or $$\\frac{\\partial f}{\\partial x}$$. "
+    "Do not use \\\\(...\\\\) or \\\\[...\\\\]; use $ and $$ only.\n\n"
+)
+
+
 def build_context(state, question, query):
     """Combine chat, PDFs, and selected images into a unified text context."""
     chat_context = "\n".join(
@@ -428,9 +462,42 @@ def build_context(state, question, query):
         )
 
     return (
-        f"{chat_context}\n\nRelevant PDF content:\n{pdf_text}"
+        f"{MATH_INSTRUCTION}{chat_context}\n\nRelevant PDF content:\n{pdf_text}"
         f"\n\nSelected Figures for Reference:{image_context}\n\nUser: {question}"
     )
+
+def build_score_map_from_retrieve(kb_id: str, question: str, num_results: int = 30) -> dict:
+    """
+    Call Bedrock retrieve() to get relevance scores. retrieve_and_generate citations
+    do not include scores, so we fetch them separately and map paper_root -> score.
+    """
+    try:
+        response = bedrock_agent.retrieve(
+            knowledgeBaseId=kb_id,
+            retrievalQuery={"text": question},
+            retrievalConfiguration={
+                "vectorSearchConfiguration": {"numberOfResults": num_results}
+            },
+        )
+        score_map = {}
+        for r in response.get("retrievalResults", []):
+            uri = r.get("location", {}).get("s3Location", {}).get("uri")
+            score = r.get("score", 0.0)
+            if not uri:
+                continue
+            bucket, key = parse_s3_uri(uri)
+            if not (bucket and key):
+                continue
+            base_dir = "/".join(key.split("/")[:-1])
+            paper_root = resolve_paper_root(key, base_dir)
+            # Use max score when multiple chunks from same paper
+            key = (bucket, paper_root)
+            score_map[key] = max(score_map.get(key, 0.0), float(score))
+        return score_map
+    except Exception as e:
+        print(f"[!] retrieve() failed for score map: {e}")
+        return {}
+
 
 def run_retrieval(question, num_results=10, threshold=0.7):
     """
@@ -497,19 +564,56 @@ def process_paper(bucket, paper_root, base_dir, score, remaining_slots):
 
 def load_structured_json(bucket, paper_root, base_dir):
     """Loads structured.json for the given paper, trying multiple common paths."""
-    candidates = [
+    def _norm(p):
+        return re.sub(r"/+", "/", p.strip("/"))
+
+    # When base_dir is .../text, structured.json lives in the parent (dir before /text)
+    parent_of_text = base_dir.rsplit("/text", 1)[0].rstrip("/") if "/text" in base_dir else None
+
+    candidates = list(dict.fromkeys([
+        f"{_norm(paper_root)}/structured.json",
         f"{paper_root}/structured.json",
+        f"{paper_root.rstrip('/')}/structured.json",
+        f"{parent_of_text}/structured.json" if parent_of_text else "",
+        f"{_norm(parent_of_text)}/structured.json" if parent_of_text else "",
+        f"{_norm(base_dir)}/structured.json",
         f"{base_dir}/structured.json",
-    ]
+    ]))
+    candidates = [c for c in candidates if c]
+    last_err = None
     for key in candidates:
         try:
             obj = s3.get_object(Bucket=bucket, Key=key)
             data = json.loads(obj["Body"].read())
             print(f"[📄] Loaded structured.json from {key}")
             return data
-        except Exception:
+        except Exception as e:
+            last_err = e
             continue
+
+    # Fallback: list S3 under paper_root (or base_dir) to find structured.json
+    # Must try raw path too - S3 keys can have double slashes (e.g. kb-data/output//PaperName)
+    for try_prefix in [p for p in [paper_root, _norm(paper_root), parent_of_text, base_dir, _norm(base_dir)] if p]:
+        prefix = try_prefix.rstrip("/") + "/"
+        try:
+            resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=500)
+            for obj in resp.get("Contents", []):
+                k = obj["Key"]
+                if k.endswith("structured.json"):
+                    try:
+                        data = json.loads(
+                            s3.get_object(Bucket=bucket, Key=k)["Body"].read()
+                        )
+                        print(f"[📄] Loaded structured.json from {k} (list fallback)")
+                        return data
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+    err_msg = str(last_err) if last_err else "unknown"
     print(f"[!] No structured.json found for paper_root={paper_root}, base_dir={base_dir}")
+    print(f"    bucket={bucket} last_error={err_msg}")
     return {}
 
 
@@ -869,27 +973,7 @@ async def upload_batch(request: Request, files: list[UploadFile] = File(...)):
 # ARXIV SCRAPER
 from arxivscraper import Scraper
 
-def compile_arxiv_query(payload: dict) -> str:
-    parts = []
-
-    # OR groups
-    for group in payload.get("groups", []):
-        if group["op"] == "OR":
-            terms = [
-                f'{t["field"]}:"{t["value"]}"'
-                for t in group["terms"]
-            ]
-            parts.append("(" + " OR ".join(terms) + ")")
-
-    # AND clauses
-    for t in payload.get("and", []):
-        parts.append(f'{t["field"]}:"{t["value"]}"')
-
-    # NOT clauses
-    for t in payload.get("not", []):
-        parts.append(f'ANDNOT {t["field"]}:"{t["value"]}"')
-
-    return " AND ".join(parts)
+from pdf_chunker.arxiv_download import compile_arxiv_query
 
 
 @app.get("/arxiv", response_class=HTMLResponse)

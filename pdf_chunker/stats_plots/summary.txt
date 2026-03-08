@@ -1,0 +1,19 @@
+PAPERS MASTER CSV — STATISTICS
+========================================
+Total papers: 623
+Buckets: 9
+
+Papers per bucket:
+  new-lwfa-not-sim-1: 80
+  new-lwfa-not-sim-2: 56
+  new-lwfa-sim-1: 80
+  new-lwfa-sim-2: 80
+  new-pwa-1: 80
+  new-pwa-2: 80
+  new-pwa-3: 59
+  new-swa-1: 80
+  new-swa-2: 28
+
+Over-capacity: 0
+Duplicate arxiv_ids: 25
+Duplicate titles: 4

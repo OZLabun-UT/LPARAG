@@ -20,6 +20,7 @@ import argparse
 import json
 import re
 import sys
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -27,35 +28,115 @@ import feedparser
 import requests
 
 
-def compile_arxiv_query(payload: dict) -> str:
-    """Build arXiv API query string from boolean payload."""
+def _normalize_title(s: str) -> str:
+    """Normalize title for comparison: lowercase, collapse whitespace."""
+    return " ".join((s or "").lower().split())
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Return similarity ratio 0-1 (1 = identical)."""
+    na, nb = _normalize_title(a), _normalize_title(b)
+    if not na or not nb:
+        return 0.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+
+def _is_duplicate(
+    title: str,
+    arxiv_id: str,
+    existing_titles: set[str],
+    existing_arxiv_ids: set[str],
+    similarity_threshold: float,
+) -> tuple[bool, str]:
+    """
+    Check if paper is a duplicate. Returns (is_dup, reason).
+    """
+    if arxiv_id and arxiv_id in existing_arxiv_ids:
+        return True, f"arxiv_id {arxiv_id}"
+    for ext in existing_titles:
+        if _title_similarity(title, ext) >= similarity_threshold:
+            return True, f"title match: {ext[:60]}..."
+    return False, ""
+
+
+def _expand_term(field: str, value: str, phrase: bool = False) -> str:
+    """
+    Expand a term for arXiv API. Multi-word values are AND'd as separate words
+    (matching arXiv website behavior) unless phrase=True for exact phrase match.
+    """
+    val = (value or "").strip()
+    if not val:
+        return ""
+    if phrase:
+        return f'{field}:"{val}"'
+    words = val.split()
+    if len(words) == 1:
+        return f'{field}:{words[0]}'
+    # Multi-word: AND each word (broader match, like arXiv website)
+    return " AND ".join(f"{field}:{w}" for w in words)
+
+
+def compile_arxiv_query(payload: dict, phrase_search: bool = False) -> str:
+    """
+    Build arXiv API query string from boolean payload.
+
+    By default, multi-word values like "structure wakefield acceleration" are
+    expanded to AND of words (all:structure AND all:wakefield AND all:acceleration),
+    matching arXiv website behavior. Set phrase_search=True for exact phrase match.
+    """
     parts = []
     for group in payload.get("groups", []):
         if group.get("op") == "OR":
-            terms = [f'{t["field"]}:"{t["value"]}"' for t in group.get("terms", [])]
+            terms = [
+                _expand_term(t["field"], t["value"], phrase=True)
+                for t in group.get("terms", [])
+                if t.get("field") and t.get("value")
+            ]
             if terms:
                 parts.append("(" + " OR ".join(terms) + ")")
     for t in payload.get("and", []):
         if t.get("field") and t.get("value"):
-            parts.append(f'{t["field"]}:"{t["value"]}"')
+            parts.append(_expand_term(t["field"], t["value"], phrase=phrase_search))
+    and_parts = [p for p in parts]
+    not_parts = []
     for t in payload.get("not", []):
         if t.get("field") and t.get("value"):
-            parts.append(f'ANDNOT {t["field"]}:"{t["value"]}"')
-    return " AND ".join(parts) if parts else "all"
+            expanded = _expand_term(t["field"], t["value"], phrase=phrase_search)
+            if expanded:
+                not_parts.append(f"({expanded})" if " AND " in expanded else expanded)
+    result = " AND ".join(and_parts) if and_parts else ""
+    if not_parts:
+        result = (result + " ANDNOT " + " ANDNOT ".join(not_parts)) if result else "ANDNOT " + " ANDNOT ".join(not_parts)
+    return result if result else "all"
 
 
 def fetch_and_download(
     payload: dict,
     download_dir: Path,
+    *,
+    existing_titles: set[str] | None = None,
+    existing_arxiv_ids: set[str] | None = None,
+    similarity_threshold: float = 0.85,
 ) -> list[dict]:
-    """Fetch papers from arXiv API and download PDFs to download_dir."""
+    """
+    Fetch papers from arXiv API and download PDFs to download_dir.
+
+    If existing_titles or existing_arxiv_ids are provided, skips papers that
+    match (exact arxiv_id match, or title similarity >= similarity_threshold).
+    """
     limit = int(payload.get("limit", 10))
     compiled = compile_arxiv_query(payload)
     encoded = quote_plus(compiled)
 
+    existing_titles = existing_titles or set()
+    existing_arxiv_ids = existing_arxiv_ids or set()
+    dedup = bool(existing_titles or existing_arxiv_ids)
+
     print(f"[🔎] Query: {compiled}")
     print(f"[🔎] Limit: {limit}")
     print(f"[📂] Output: {download_dir}")
+    if dedup:
+        print(f"[🔄] Dedup: {len(existing_titles)} titles, {len(existing_arxiv_ids)} arxiv_ids (threshold={similarity_threshold})")
 
     url = (
         "https://export.arxiv.org/api/query"
@@ -65,12 +146,24 @@ def fetch_and_download(
     download_dir.mkdir(parents=True, exist_ok=True)
 
     papers = []
+    skipped = 0
     for entry in feed.entries:
         title = entry.title.strip().replace("\n", " ")
         authors = ", ".join(a.name for a in entry.authors)
         abstract = entry.summary.strip().replace("\n", " ")
         arxiv_id = entry.id.split("/abs/")[-1]
         pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+        if dedup:
+            is_dup, reason = _is_duplicate(
+                title, arxiv_id,
+                existing_titles, existing_arxiv_ids,
+                similarity_threshold,
+            )
+            if is_dup:
+                print(f"[⏭] Skipped duplicate ({reason}): {title[:60]}...")
+                skipped += 1
+                continue
 
         safe_name = (
             re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_") + ".pdf"
@@ -95,6 +188,8 @@ def fetch_and_download(
             "pdf_path": str(pdf_path),
         })
 
+    if dedup and skipped:
+        print(f"[ℹ️] Skipped {skipped} duplicates, downloaded {len(papers)} new papers")
     return papers
 
 

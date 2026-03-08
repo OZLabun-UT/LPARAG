@@ -52,6 +52,27 @@ def s3_object_md5(bucket: str, key: str) -> str | None:
         return None
 
 
+def count_papers_in_bucket(
+    bucket_name: str,
+    prefix: str = "kb-data",
+    region: str | None = None,
+) -> int:
+    """Count paper folders (papers) already in the bucket under prefix/output/."""
+    s3 = boto3.client("s3", region_name=region or AWS_REGION)
+    count = 0
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(
+            Bucket=bucket_name,
+            Prefix=f"{prefix}/output/",
+            Delimiter="/",
+        ):
+            count += len(page.get("CommonPrefixes", []))
+    except Exception as e:
+        print(f"[!] Could not count papers in {bucket_name}: {e}")
+    return count
+
+
 def folder_exists_in_s3(bucket_name: str, prefix: str) -> bool:
     """Return True if a folder/prefix already exists in the given S3 bucket."""
     s3 = boto3.client("s3", region_name=AWS_REGION)
@@ -66,9 +87,9 @@ def folder_exists_in_s3(bucket_name: str, prefix: str) -> bool:
 def ensure_bucket_exists(bucket_name: str, region: str | None = None) -> None:
     """Create S3 bucket if it does not exist. Idempotent."""
     region = region or AWS_REGION
-    s3 = boto3.client("s3", region_name=region)
     bucket_name = bucket_name.lower().strip()
     try:
+        s3 = boto3.client("s3", region_name=region)
         if region == "us-east-1":
             s3.create_bucket(Bucket=bucket_name)
         else:
@@ -81,8 +102,19 @@ def ensure_bucket_exists(bucket_name: str, region: str | None = None) -> None:
         code = e.response.get("Error", {}).get("Code", "")
         if code in ("BucketAlreadyExists", "BucketAlreadyOwnedByYou"):
             pass  # already exists
+        elif code in ("InvalidAccessKeyId", "SignatureDoesNotMatch", "AccessDenied"):
+            print(f"[❌] AWS authentication failed for bucket {bucket_name}")
+            print(f"     Error: {e}")
+            print(f"     → Check your AWS credentials in .env:")
+            print(f"        AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be valid")
+            raise
         else:
             raise
+    except Exception as e:
+        if "InvalidAccessKeyId" in str(e) or "NoCredentialsError" in str(type(e).__name__):
+            print(f"[❌] AWS credentials not found or invalid")
+            print(f"     → Ensure .env contains valid AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+        raise
 
 
 def duplicate_pdfs_exist(bucket_name: str, local_folder: Path, s3_prefix: str) -> bool:

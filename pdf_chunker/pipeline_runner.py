@@ -9,9 +9,14 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables BEFORE importing boto3-dependent modules
+load_dotenv(override=True)
 
 from pdf_chunker.arxiv_download import fetch_and_download
-from pdf_chunker.s3_push import chunk_and_upload_s3_only, ensure_bucket_exists
+from pdf_chunker.export_papers_csv import load_existing_papers_from_csv
+from pdf_chunker.s3_push import chunk_and_upload_s3_only, ensure_bucket_exists, count_papers_in_bucket
 
 
 def run_pipeline(
@@ -24,6 +29,10 @@ def run_pipeline(
     verify: bool = True,
     pdf_batch_size: int = 8,
     pdf_dir: Path | None = None,
+    *,
+    papers_csv_path: Path | str | None = None,
+    dedup: bool = True,
+    similarity_threshold: float = 0.85,
 ) -> int:
     """
     Run pipeline: download papers once (only if PDF folder is empty) → process in batches of 8 → upload → delete each batch.
@@ -38,6 +47,9 @@ def run_pipeline(
         verify: Whether to verify chunk structure in S3 after upload.
         pdf_batch_size: PDFs per batch (default: 8); each batch is chunked, uploaded, then deleted.
         pdf_dir: Persistent directory for PDFs (default: pdf_chunker/pipeline_pdfs). Set via PIPELINE_PDFS_DIR to override.
+        papers_csv_path: Path to papers_master.csv for deduplication. Default: pdf_chunker/papers_master.csv or PAPERS_MASTER_CSV env.
+        dedup: If True, skip papers whose title/arxiv_id matches existing entries in the CSV.
+        similarity_threshold: Title similarity threshold for dedup (0-1, default 0.85).
 
     Returns:
         0 on success, 1 on failure.
@@ -63,7 +75,26 @@ def run_pipeline(
     all_pdfs = sorted(persistent_dir.glob("*.pdf"))
     if not all_pdfs:
         print("\n[1/3] PDF folder empty — downloading papers from arXiv...")
-        papers = fetch_and_download(query_payload, persistent_dir)
+        existing_titles, existing_arxiv_ids = set(), set()
+        if dedup:
+            csv_path = Path(papers_csv_path) if papers_csv_path else Path(
+                os.getenv("PAPERS_MASTER_CSV", str(script_dir / "papers_master.csv"))
+            )
+            existing_titles, existing_arxiv_ids = load_existing_papers_from_csv(csv_path)
+            if existing_titles or existing_arxiv_ids:
+                print(f"      Loaded {len(existing_titles)} titles, {len(existing_arxiv_ids)} arxiv_ids from {csv_path}")
+            else:
+                if csv_path.exists():
+                    print(f"      CSV {csv_path} empty or unreadable")
+                else:
+                    print(f"      No dedup CSV at {csv_path} — proceeding without dedup")
+        papers = fetch_and_download(
+            query_payload,
+            persistent_dir,
+            existing_titles=existing_titles,
+            existing_arxiv_ids=existing_arxiv_ids,
+            similarity_threshold=similarity_threshold,
+        )
         n_downloaded = len(papers)
         print(f"      Downloaded {n_downloaded} papers")
         if n_downloaded < 1:
@@ -75,22 +106,38 @@ def run_pipeline(
 
     # 2) Process in batches of 8: chunk → upload → delete batch from folder
     print("\n[2/3] Chunking and uploading in batches (deleting each batch after upload)...")
-    bucket_index = 0
-    count_in_bucket = 0
+    import boto3
+    s3 = boto3.client("s3", region_name=region)
     buckets_used: list[str] = []
     batch_num = 0
 
-    while bucket_index < num_buckets:
+    while True:
         batch_pdfs = sorted(persistent_dir.glob("*.pdf"))[:pdf_batch_size]
         if not batch_pdfs:
             break
 
-        batch_num += 1
-        bucket = buckets[bucket_index]
-        if bucket_index >= len(buckets_used):
-            ensure_bucket_exists(bucket, region=region)
-            buckets_used.append(bucket)
+        # Find a bucket with space (existing papers < papers_per_bucket)
+        bucket = None
+        for b in buckets:
+            try:
+                ensure_bucket_exists(b, region=region)
+            except Exception as e:
+                print(f"\n[❌] Failed to create/access bucket {b}: {e}")
+                raise
+            existing = count_papers_in_bucket(b, prefix=prefix, region=region)
+            if existing < papers_per_bucket:
+                bucket = b
+                if b not in buckets_used:
+                    buckets_used.append(b)
+                print(f"      [{b}] has {existing}/{papers_per_bucket} papers")
+                break
+            else:
+                print(f"      [{b}] full ({existing} papers) — skipping")
+        if bucket is None:
+            print("\n[!] All buckets full. Stopping.")
+            break
 
+        batch_num += 1
         print(f"\n[📦] Batch {batch_num} ({len(batch_pdfs)} PDFs) → {bucket}")
         temp_root = Path(tempfile.mkdtemp(prefix="pipeline_batch_"))
         temp_dir = temp_root / "batch"
@@ -99,7 +146,14 @@ def run_pipeline(
         try:
             for pdf in batch_pdfs:
                 shutil.move(str(pdf), str(temp_dir / pdf.name))
-            chunk_and_upload_s3_only(temp_dir, bucket, prefix=prefix)
+            try:
+                chunk_and_upload_s3_only(temp_dir, bucket, prefix=prefix)
+            except Exception as e:
+                print(f"\n[❌] Failed to chunk/upload batch {batch_num} to {bucket}: {e}")
+                print(f"     Error type: {type(e).__name__}")
+                if "InvalidAccessKeyId" in str(e) or "AccessDenied" in str(e):
+                    print(f"     → AWS authentication failed. Check credentials in .env")
+                raise
         finally:
             # Remove batch dir and any chunker output; then remove temp root
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -107,11 +161,6 @@ def run_pipeline(
             if output_dir.exists():
                 shutil.rmtree(output_dir, ignore_errors=True)
             shutil.rmtree(temp_root, ignore_errors=True)
-
-        count_in_bucket += len(batch_pdfs)
-        if count_in_bucket >= papers_per_bucket:
-            bucket_index += 1
-            count_in_bucket = 0
 
     remaining = len(list(persistent_dir.glob("*.pdf")))
     if remaining:
@@ -122,8 +171,6 @@ def run_pipeline(
     # 3) Verify
     if verify and buckets_used:
         print("\n[3/3] Verifying chunk structure in S3...")
-        import boto3
-        s3 = boto3.client("s3", region_name=region)
         for b in buckets_used:
             try:
                 resp = s3.list_objects_v2(

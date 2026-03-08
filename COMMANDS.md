@@ -39,6 +39,31 @@ python run_pwa_pipeline.py --test
 python run_swa_pipeline.py --test
 
 
+# Export papers master list (S3 buckets with 'new' prefix → CSV)
+
+source .venv/bin/activate
+cd pdf_chunker
+python export_papers_csv.py -o papers_master.csv
+python export_papers_csv.py --output my_papers.csv --bucket-prefix new
+
+# Pipelines use papers_master.csv for deduplication: before downloading from arXiv,
+# they skip papers whose title (similarity ≥ 0.85) or arxiv_id matches existing entries.
+# Run export_papers_csv first to generate/refresh the CSV, then run pipelines.
+# Use --no-dedup to disable: python run_pwa_pipeline.py --no-dedup
+#
+# Pipelines also check S3 bucket capacity: before each batch, they skip buckets that
+# already have ≥ papers_per_bucket (80) papers, moving to the next bucket.
+#
+# Rebalance buckets: move excess papers from over-full buckets to ones with space
+cd pdf_chunker
+python rebalance_buckets.py --dry-run   # preview
+python rebalance_buckets.py            # run
+python rebalance_buckets.py --max-papers 80 --bucket-prefix new
+#
+# Papers CSV statistics and plots
+cd pdf_chunker
+python papers_stats.py -c papers_master.csv -o stats_plots
+
 # See bucket IDs
 
 aws bedrock-agent list-knowledge-bases \

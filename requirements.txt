@@ -8,3 +8,5 @@ unstructured[all-docs]
 tqdm
 arxivscraper
 feedparser
+pandas
+matplotlib

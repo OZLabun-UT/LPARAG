@@ -6,6 +6,16 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="/favicon.ico" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'] }
+    };
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <style>
     :root {
@@ -142,8 +152,9 @@
 
     #newChatBtn{background:linear-gradient(135deg,var(--accent),var(--primary));color:white;border:none;
       border-radius:8px;padding:0.6rem 0.8rem;cursor:pointer;margin-bottom:0.8rem;font-weight:600;}
-
-
+    .delete-all-btn{background:transparent;color:var(--subtext);border:1px solid var(--border);
+      border-radius:8px;padding:0.5rem 0.7rem;cursor:pointer;margin-bottom:0.8rem;font-size:0.9rem;}
+    .delete-all-btn:hover{color:#f87171;border-color:#f87171;}
 
     #convoTabs{display:flex;flex-direction:column;gap:0.4rem;overflow-y:auto;}
     .convo-tab{background:var(--accent-bg);color:var(--text);border:1px solid var(--border);
@@ -411,6 +422,19 @@
     100% { transform: rotate(360deg); }
   }
 
+  .modal-s3-link {
+    display: inline-block;
+    margin-top: 0.8rem;
+    padding: 0.5rem 1rem;
+    background: linear-gradient(135deg, var(--accent), var(--primary));
+    color: white;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .modal-s3-link:hover { opacity: 0.9; }
+
   </style>
 </head>
 <body>
@@ -429,6 +453,7 @@
   <main>
     <aside id="sidebar">
       <button id="newChatBtn">➕ New Chat</button>
+      <button id="deleteAllChatsBtn" class="delete-all-btn" type="button" title="Delete all local chats">🗑 Delete All Chats</button>
       <div id="convoTabs"></div>
     </aside>
     <button id="sidebarToggle" title="Toggle chat list">
@@ -521,6 +546,7 @@
       <img id="modalImage" class="modal-image" src="" alt="Figure">
       <div id="modalCaption" class="modal-caption"></div>
       <div id="modalContext" class="modal-context"></div>
+      <a id="modalS3Link" href="#" target="_blank" rel="noopener" class="modal-s3-link" style="display:none;">☁️ Open in S3 Console</a>
     </div>
   </div>
 
@@ -604,7 +630,11 @@
   
     function switchConversation(id){
       activeSession=id;sessionId=id;
-      document.getElementById("chat").innerHTML=conversations[id]||"";
+      const chatBox=document.getElementById("chat");
+      chatBox.innerHTML=conversations[id]||"";
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        MathJax.typesetPromise([chatBox]).catch(() => {});
+      }
       updateActiveTab();saveToLocal();
     }
   
@@ -620,6 +650,18 @@
       saveToLocal();
     }
 
+    function deleteAllChats(){
+      if(!confirm("Delete all local chats? This cannot be undone."))return;
+      conversations={};
+      activeSession=null;
+      sessionId=null;
+      document.getElementById("convoTabs").innerHTML="";
+      document.getElementById("chat").innerHTML="";
+      saveToLocal();
+    }
+
+    document.getElementById("deleteAllChatsBtn").onclick=deleteAllChats;
+
     document.querySelector(".preset-header").onclick = () => {
     document.querySelector(".preset-box").classList.toggle("open");
   };
@@ -628,10 +670,17 @@
     document.getElementById("newChatBtn").onclick=newConversation;
   
     // ---------- Modal ----------
-    function openModal(imgUrl, caption, context) {
+    function openModal(imgUrl, caption, context, s3ConsoleUrl) {
       document.getElementById('modalImage').src = imgUrl;
       document.getElementById('modalCaption').textContent = caption || 'No caption available';
       document.getElementById('modalContext').textContent = context || 'No context available';
+      const s3Link = document.getElementById('modalS3Link');
+      if (s3ConsoleUrl) {
+        s3Link.href = s3ConsoleUrl;
+        s3Link.style.display = 'inline-block';
+      } else {
+        s3Link.style.display = 'none';
+      }
       document.getElementById('imageModal').classList.add('active');
     }
     function closeModal(event) {
@@ -709,8 +758,6 @@
             <div class="markdown-body">${rendered}</div>
           </div>
         `;
-        MathJax.typesetPromise();
-
 
         // ---- FIGURES ----
         if (!lastMessageUsedImages) {
@@ -722,13 +769,14 @@
               const context = (img.context || "No context available")
                 .replace(/'/g,"&#39;").replace(/"/g,"&quot;").replace(/\n+/g," ");
               const source = img.source || "";
+              const s3Url = (img.s3_console_url || "").replace(/&/g,"&amp;").replace(/"/g,"&quot;");
               const id = crypto.randomUUID();
               msgHtml += `
                 <div class='figure-card'>
                   <button class="delete-btn" onclick="handleImageDelete('${img.url}', this)">×</button>
                   <input type='checkbox' id='chk-${id}' class='figure-checkbox'
                     onchange='toggleImageSelect(this, "${img.url}", \`${caption}\`, \`${context}\`, "${source}")' />
-                  <img src='${img.url}' alt='Figure' onclick='openModal("${img.url}", \`${caption}\`, \`${context}\`)' />
+                  <img src='${img.url}' alt='Figure' onclick='openModal("${img.url}", \`${caption}\`, \`${context}\`, "${s3Url}")' />
                   <div class='figure-overlay'>Click to view details</div>`;
               // ---- OPTIONAL RELEVANCE FOR IMAGES ----
               if (img.relevance !== undefined && img.relevance !== null) {
@@ -770,6 +818,10 @@
 
         chatBox.innerHTML += msgHtml;
         chatBox.scrollTop = chatBox.scrollHeight;
+
+        if (window.MathJax && window.MathJax.typesetPromise) {
+          MathJax.typesetPromise([chatBox]).catch(() => {});
+        }
 
         selectedImages = [];
         document.querySelectorAll(".figure-checkbox").forEach(c => (c.checked = false));

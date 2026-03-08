@@ -39,10 +39,10 @@ ROUTER_MODEL_ARN = os.getenv(
 # Knowledge base registry (IDs from env; see .env.example)
 # ------------------------------------------------------------------
 KB_REGISTRY = {
-    "lwfa-sim": os.getenv("KB_LWFA_SIM_ID"),
-    "lwfa-not-sim": os.getenv("KB_LWFA_NOT_SIM_ID"),
-    "pwa": os.getenv("KB_PWA_ID"),
-    "swa": os.getenv("KB_SWA_ID"),
+    "lwfa-sim": os.getenv("NEW_KB_LWFA_SIM_ID"),
+    "lwfa-not-sim": os.getenv("NEW_KB_LWFA_NOT_SIM_ID"),
+    "pwa": os.getenv("NEW_KB_PWA_ID"),
+    "swa": os.getenv("NEW_KB_SWA_ID"),
 }
 
 DEFAULT_DOMAIN = "lwfa-sim"
@@ -105,9 +105,6 @@ Question:
     # Safe fallback
     return DEFAULT_DOMAIN
 
-# ------------------------------------------------------------------
-# 2) KB query (identical behavior to main chatbot)
-# ------------------------------------------------------------------
 def query_kb(
     kb_id: str,
     question: str,
@@ -168,6 +165,7 @@ def run_master_query(
     # Normalize output so main app doesn't care about routing
     return {
         "domain": domain,
+        "kb_id": kb_id,
         "answer": response.get("output", {}).get("text", ""),
         "citations": response.get("citations", []),
         "raw_response": response,  # optional: useful for debugging

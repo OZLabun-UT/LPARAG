@@ -22,6 +22,7 @@ QUERY = {
 if __name__ == "__main__":
     parser = __import__("argparse").ArgumentParser()
     parser.add_argument("--test", action="store_true", help="10 papers, 2 buckets")
+    parser.add_argument("--no-dedup", action="store_true", help="Disable duplicate check against papers_master.csv")
     args = parser.parse_args()
     try:
         sys.exit(run_pipeline(
@@ -30,6 +31,7 @@ if __name__ == "__main__":
             total_papers=10 if args.test else 300,
             papers_per_bucket=5 if args.test else 80,
             num_buckets=2 if args.test else 5,
+            dedup=not args.no_dedup,
         ))
     except Exception as e:
         print(f"[❌] Pipeline failed: {e}")
