@@ -20,7 +20,6 @@ ngrok http 3001
 
 source .venv/bin/activate
 
-python -m aws_interface.main
 python3 -m aws_interface.main
 
 
@@ -160,9 +159,9 @@ ACTUAL:
 
 chmod 400 rag-instance-actual.pem
 
-ssh -i rag-instance-actual.pem ubuntu@3.142.186.60
+ssh -i rag-instance-actual.pem ubuntu@18.217.125.210
 
-scp -i  rag-instance-actual.pem .env ubuntu@3.142.186.60:/home/ubuntu/tau-topical-expert/.env
+scp -i  rag-instance-actual.pem .env ubuntu@18.217.125.210:/home/ubuntu/tau-topical-expert/.env
 
 # Update EC2
 ssh -i rag-instance-actual.pem ubuntu@3.142.186.60
@@ -190,6 +189,7 @@ Claude Sonnet 4
 Claude 3.5 Sonnet v2
 Nova Pro
 Nova Premier
+Nova 2.0 Lite (migration path for Nova 1.0 Premier; amazon.nova-2-lite-v1:0)
 Nova Lite
 Nova Micro
 Llama 4 Scout 17B
@@ -206,7 +206,6 @@ Claude Opus 4.1
 # To-dos
 
 https://github.com/Mahdisadjadi/arxivscraper
-
     Figure out how to make it so ppl can make accounts and stuff
     Can we figure out how to see relevant appendices when there's not much nat lang there?
 
@@ -229,6 +228,12 @@ https://github.com/Mahdisadjadi/arxivscraper
       * Notes on pic code from someone and one is lwfa
       * High power laser matter interactions
       * Save all questions that you have about it
+    * Make sure about system prompt
+    * Basic bucket
+      * lecture transcripts
+      * slides
+      * textbooks
+      * No worries on figures
 
     * THE PREAMBLES AFFECT THE RETURNED SOURCES AND SCORES?
     * Need to fix AmazonBedrockExecutionRoleForKnowledgeBase_c0q2t

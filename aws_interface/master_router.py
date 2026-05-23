@@ -8,8 +8,9 @@ retrieve_and_generate flow as the main chatbot.
 
 import os
 import json
+import time
 import boto3
-from typing import Dict
+from typing import Dict, Tuple
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -31,8 +32,8 @@ bedrock_agent = boto3.client(
 
 ROUTER_MODEL_ARN = os.getenv(
     "ROUTER_MODEL_ARN",
-    # sensible default
-    "arn:aws:bedrock:us-east-2:251132308857:inference-profile/us.anthropic.claude-3-haiku-20240307-v1:0"
+    # sensible default (Claude 3.5 Haiku; set ROUTER_MODEL_ARN to override)
+    "arn:aws:bedrock:us-east-2:251132308857:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0"
 )
 
 # ------------------------------------------------------------------
@@ -144,10 +145,13 @@ def run_master_query(
     """
     - Routes question to correct KB
     - Executes retrieve_and_generate
-    - Returns SAME response shape as main pipeline
+    - Returns SAME response shape as main pipeline, plus timing_ms dict
     """
 
+    t0 = time.monotonic()
     domain = classify_query(question)
+    classification_ms = round((time.monotonic() - t0) * 1000)
+
     kb_id = KB_REGISTRY.get(domain)
 
     if not kb_id:
@@ -155,12 +159,14 @@ def run_master_query(
 
     print(f"[Router] Routed to KB: {domain}")
 
+    t1 = time.monotonic()
     response = query_kb(
         kb_id=kb_id,
         question=question,
         model_arn=model_arn,
         result_limit=result_limit,
     )
+    retrieval_generation_ms = round((time.monotonic() - t1) * 1000)
 
     # Normalize output so main app doesn't care about routing
     return {
@@ -169,4 +175,8 @@ def run_master_query(
         "answer": response.get("output", {}).get("text", ""),
         "citations": response.get("citations", []),
         "raw_response": response,  # optional: useful for debugging
+        "timing_ms": {
+            "classification": classification_ms,
+            "retrieval_and_generation": retrieval_generation_ms,
+        },
     }

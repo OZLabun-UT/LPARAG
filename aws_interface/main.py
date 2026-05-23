@@ -12,6 +12,7 @@ load_dotenv(override=True)
 
 import boto3
 import re
+import time
 import mimetypes
 from urllib.parse import quote_plus
 from pathlib import Path
@@ -26,6 +27,7 @@ from io import BytesIO
 from PIL import Image
 from datetime import datetime
 from aws_interface.master_router import run_master_query
+from aws_interface.rag_logger import RagLogger
 from fastapi.staticfiles import StaticFiles
 
 
@@ -50,7 +52,6 @@ REGION = os.getenv("AWS_REGION", "us-east-2")
 # -----------------------
 
 MODEL_ARNS = {
-    "Claude Sonnet 4": os.getenv("CLAUDE_SONNET_4_ARN"),
     "Claude Sonnet 4.5": os.getenv("CLAUDE_SONNET_4_5_ARN"),
     "Claude Haiku 4.5": os.getenv("CLAUDE_HAIKU_4_5_ARN"),
     "Claude Opus 4": os.getenv("CLAUDE_OPUS_4_ARN"),
@@ -58,9 +59,9 @@ MODEL_ARNS = {
     "Claude 3.7 Sonnet": os.getenv("CLAUDE_SONNET_3_7_ARN"),
     "Claude 3.5 Sonnet v2": os.getenv("CLAUDE_SONNET_3_5_V2_ARN"),
     "Claude 3.5 Haiku": os.getenv("CLAUDE_HAIKU_3_5_ARN"),
-    "Claude 3 Haiku": os.getenv("CLAUDE_HAIKU_3_ARN"),
 
     "Nova Premier": os.getenv("NOVA_PREMIER_ARN"),
+    "Nova 2.0 Lite": os.getenv("NOVA_2_LITE_ARN"),  # Migration path for Nova 1.0 Premier (amazon.nova-2-lite-v1:0)
     "Nova Pro": os.getenv("NOVA_PRO_ARN"),
     "Nova Lite": os.getenv("NOVA_LITE_ARN"),
     "Nova Micro": os.getenv("NOVA_MICRO_ARN"),
@@ -90,6 +91,7 @@ debug=False
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 app = FastAPI()
+rag_logger = RagLogger()
 
 # In-memory state
 session_state = {}
@@ -338,32 +340,25 @@ async def query_kb(query: dict, request: Request):
     Main endpoint: builds context, queries Bedrock retrieve(),
     processes structured JSON + figures, and returns PDFs with relevance scores.
     """
+    t_total_start = time.monotonic()
+    session_id = query.get("session_id") or str(uuid4())
+    question_raw = query.get("question", "")
+    model_name = query.get("model_name", "Claude Sonnet 4.5")
+    error_msg = None
+
     try:
-        session_id = query.get("session_id") or str(uuid4())
         state = session_state.setdefault(session_id, {"history": [], "citations": [], "temp_pdfs": []})
         result_limit = int(query.get("result_limit", 10))
         score_threshold = float(query.get("score_threshold", 0.7))
-
-
-        # Janky solution
-        #question = "You are a topical expert language model that is a domain expert in the field that you have references to. All of your answers must be sent in hierarchical structures and bullet points to make them easily digestible. It is important that you separate all of your different answers and points with newlines. Now answer the following question: " + query["question"]
-        question = query["question"]
-
-        #question = query["question"]
         image_limit = int(query.get("image_limit", 8))
+        selected_images = query.get("selected_images", [])
+
+        question = question_raw
 
         # 1️⃣ Build prompt context
         combined_prompt = build_context(state, question, query)
 
-        """# 2️⃣ Run Bedrock retrieval
-        response = run_retrieval(combined_prompt, result_limit, score_threshold)
-        retrievals = response.get("retrievalResults", [])
-        model_name = query.get("model_name", "Claude Sonnet 4")
-        model_arn = get_model_arn(model_name)
-        generated_answer = run_generation(combined_prompt, retrievals, model_arn, result_limit, score_threshold) """
-
         # 2️⃣ Route + retrieve + generate (router decides KB)
-        model_name = query.get("model_name", "Claude Sonnet 4")
         model_arn = get_model_arn(model_name)
 
         router_result = run_master_query(
@@ -373,6 +368,8 @@ async def query_kb(query: dict, request: Request):
         )
 
         generated_answer = router_result["answer"]
+        domain_classified = router_result.get("domain", "unknown")
+        router_timing = router_result.get("timing_ms", {})
 
         # Extract retrievals for downstream image/PDF processing
         retrievals = []
@@ -381,15 +378,19 @@ async def query_kb(query: dict, request: Request):
 
         # retrieve_and_generate citations don't include scores; fetch from retrieve() API
         kb_id = router_result.get("kb_id")
+        t_score_start = time.monotonic()
         score_map = {}
         if kb_id:
             score_map = build_score_map_from_retrieve(
                 kb_id, combined_prompt, num_results=min(50, result_limit * 5)
             )
+        score_map_ms = round((time.monotonic() - t_score_start) * 1000)
 
         # 3️⃣ Process each retrieved paper
+        t_enrich_start = time.monotonic()
         all_links, pdf_links, total_images = [], [], 0
         processed_folders = set()
+        referenced_papers = []
 
         for r_idx, result in enumerate(retrievals):
             s3_uri = result.get("location", {}).get("s3Location", {}).get("uri")
@@ -402,13 +403,12 @@ async def query_kb(query: dict, request: Request):
 
             base_dir = "/".join(key.split("/")[:-1])
             paper_root = resolve_paper_root(key, base_dir)
-            # Citations from retrieve_and_generate don't include score; look up from retrieve() results
             score = score_map.get((bucket, paper_root), result.get("score", 0.0))
             if paper_root in processed_folders:
                 continue
             processed_folders.add(paper_root)
+            referenced_papers.append({"bucket": bucket, "paper_root": paper_root, "score": round(float(score), 4)})
 
-            # Process one full paper (structured.json + figures + pdf)
             links, pdfs, img_count = process_paper(bucket, paper_root, base_dir, score, image_limit - total_images)
             all_links.extend(links)
             pdf_links.extend(pdfs)
@@ -417,10 +417,44 @@ async def query_kb(query: dict, request: Request):
             if total_images >= image_limit:
                 break
 
+        enrichment_ms = round((time.monotonic() - t_enrich_start) * 1000)
+
         # 4️⃣ Compose response
-        answer = generated_answer 
+        answer = generated_answer
         state["history"].append({"user": question, "assistant": answer})
         state["citations"].extend(all_links)
+
+        total_ms = round((time.monotonic() - t_total_start) * 1000)
+
+        # 5️⃣ Log the interaction
+        rag_logger.log({
+            "session_id": session_id,
+            "query": question_raw,
+            "answer": answer,
+            "model_name": model_name,
+            "domain_classified": domain_classified,
+            "result_limit": result_limit,
+            "score_threshold": score_threshold,
+            "image_limit": image_limit,
+            "timing_ms": {
+                "classification": router_timing.get("classification", 0),
+                "retrieval_and_generation": router_timing.get("retrieval_and_generation", 0),
+                "score_map_build": score_map_ms,
+                "enrichment": enrichment_ms,
+                "total": total_ms,
+            },
+            "referenced_papers": referenced_papers,
+            "relevance_scores": {
+                f"{b}/{p}": s
+                for (b, p), s in score_map.items()
+            },
+            "num_documents_returned": len(all_links),
+            "num_pdfs_returned": len(pdf_links),
+            "selected_images": [img.get("source") for img in selected_images],
+            "history_turns_included": len(state["history"]) - 1,
+            "temp_pdfs_included": len(state["temp_pdfs"]),
+            "error": None,
+        })
 
         return {
             "session_id": session_id,
@@ -433,7 +467,18 @@ async def query_kb(query: dict, request: Request):
     except Exception as e:
         print(f"[❌] Query failed: {e}")
         import traceback; traceback.print_exc()
-        return {"error": str(e)}
+        error_msg = str(e)
+        total_ms = round((time.monotonic() - t_total_start) * 1000)
+        rag_logger.log({
+            "session_id": session_id,
+            "query": question_raw,
+            "answer": None,
+            "model_name": model_name,
+            "domain_classified": None,
+            "timing_ms": {"total": total_ms},
+            "error": error_msg,
+        })
+        return {"error": error_msg}
 
 # ============================================================
 # --------------------- HELPER FUNCTIONS ----------------------

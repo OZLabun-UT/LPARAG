@@ -1,4 +1,5 @@
 .env
+logs/
 storage/
 anythingllm_storage/
 *.db
